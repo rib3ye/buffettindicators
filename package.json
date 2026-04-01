@@ -5,5 +5,8 @@
   "description": "Lightweight local web server for BuffettIndex",
   "scripts": {
     "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }
