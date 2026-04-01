@@ -3,7 +3,126 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Buffett Indicator - US Stock Market Value to GDP</title>
+
+  <!-- ── Primary SEO ──────────────────────────────────────────────────────── -->
+  <title>BuffettIndex — US Stock Market Valuation Dashboard</title>
+  <meta name="description" content="Track four independent gauges of US stock market valuation in real time: Buffett Indicator (Market Cap/GDP), Shiller CAPE Ratio, Fed Model, and Corporate Profits/GDP. Live data from FRED and Robert Shiller's Yale dataset. Free, no login required.">
+  <meta name="keywords" content="buffett indicator, shiller cape ratio, fed model, corporate profits gdp, stock market valuation, market cap to gdp, is the market overvalued, shiller cape 2025, buffett indicator 2025, stock market overvalued, cyclically adjusted pe ratio, market valuation dashboard">
+  <meta name="author" content="BuffettIndex">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://buffettindex.info/">
+
+  <!-- ── Open Graph ───────────────────────────────────────────────────────── -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="BuffettIndex">
+  <meta property="og:title" content="BuffettIndex — US Stock Market Valuation Dashboard">
+  <meta property="og:description" content="Four independent gauges of US market valuation — Buffett Indicator, Shiller CAPE, Fed Model, and Corporate Profits/GDP — updated live from primary sources. Free and no login required.">
+  <meta property="og:url" content="https://buffettindex.info/">
+  <meta property="og:image" content="https://buffettindex.info/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="BuffettIndex dashboard showing four US stock market valuation gauges: Buffett Indicator, Shiller CAPE, Fed Model, and Corporate Profits/GDP">
+  <meta property="og:locale" content="en_US">
+
+  <!-- ── Twitter Card ─────────────────────────────────────────────────────── -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="BuffettIndex — US Stock Market Valuation Dashboard">
+  <meta name="twitter:description" content="Four independent gauges of US market valuation — Buffett Indicator, Shiller CAPE, Fed Model, and Corporate Profits/GDP — updated live from primary sources.">
+  <meta name="twitter:image" content="https://buffettindex.info/og-image.png">
+  <meta name="twitter:image:alt" content="BuffettIndex dashboard showing four US stock market valuation gauges">
+
+  <!-- ── Structured Data (JSON-LD) ────────────────────────────────────────── -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://buffettindex.info/#website",
+        "url": "https://buffettindex.info/",
+        "name": "BuffettIndex",
+        "description": "Free US stock market valuation dashboard tracking the Buffett Indicator, Shiller CAPE Ratio, Fed Model, and Corporate Profits/GDP with live data from FRED and Yale.",
+        "inLanguage": "en-US"
+      },
+      {
+        "@type": "WebApplication",
+        "@id": "https://buffettindex.info/#app",
+        "name": "BuffettIndex",
+        "url": "https://buffettindex.info/",
+        "applicationCategory": "FinanceApplication",
+        "operatingSystem": "Any",
+        "description": "Real-time US stock market valuation dashboard. Tracks four valuation metrics — Buffett Indicator (Market Cap/GDP), Shiller CAPE Ratio, Fed Model (Earnings Yield vs 10-Year Treasury), and Corporate Profits/GDP — using live data from the Federal Reserve FRED database and Robert Shiller's Yale dataset.",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "featureList": [
+          "Buffett Indicator (Wilshire 5000 / GDP)",
+          "Shiller CAPE Ratio since 1881",
+          "Fed Model — Earnings Yield vs 10-Year Treasury",
+          "Corporate Profits as % of GDP",
+          "Live data from FRED (Federal Reserve Bank of St. Louis)",
+          "No login or account required"
+        ]
+      },
+      {
+        "@type": "FAQPage",
+        "@id": "https://buffettindex.info/#faq",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "What is the Buffett Indicator?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "The Buffett Indicator is the ratio of total US stock market capitalization (Wilshire 5000) to GDP. Warren Buffett called it 'probably the best single measure of where valuations stand at any given moment.' A reading above 100% means investors are paying more for US equities than the entire economy produces in a year."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What is the Shiller CAPE Ratio?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "The Shiller CAPE (Cyclically Adjusted Price-to-Earnings) ratio is the S&P 500 price divided by the 10-year average of inflation-adjusted earnings. Developed by Nobel laureate Robert Shiller, it smooths out single-year earnings distortions. The long-run historical average is approximately 17x. Readings above 30x have historically preceded significant market corrections."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What is the Fed Model?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "The Fed Model compares the earnings yield of the stock market (the inverse of the CAPE ratio, expressed as a percentage) against the 10-year US Treasury yield. A positive spread means stocks are yielding more than risk-free bonds, suggesting equities are relatively attractive. A negative spread means bonds offer higher yields than stocks."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What does Corporate Profits / GDP measure?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Corporate Profits / GDP tracks after-tax corporate profits as a share of the entire US economy. This ratio is historically mean-reverting — high margins attract competition, give labor negotiating power, and invite regulatory scrutiny. The historical average is around 6–7% of GDP. Sustained readings above this level imply mean-reversion risk."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is the US stock market overvalued right now?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "BuffettIndex tracks four independent valuation measures in real time to help investors assess current US market valuations. Visit buffettindex.info to see live readings for the Buffett Indicator, Shiller CAPE, Fed Model, and Corporate Profits/GDP, each updated from primary sources including FRED and Robert Shiller's Yale dataset."
+            }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
+
+  <!-- ── Favicon & Web App Manifest ───────────────────────────────────────── -->
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/site.webmanifest">
+  <meta name="theme-color" content="#06070D">
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garant:ital,wght@0,400;0,600;1,400;1,600&family=JetBrains+Mono:wght@300;400;500&family=DM+Sans:opsz,wght@9..40,300;9..40,400&display=swap" rel="stylesheet">
@@ -370,7 +489,7 @@
       padding-top: 8px;
     }
 
-    .section-text h1 {
+    .section-text h2 {
       font-family: 'Cormorant Garant', Georgia, serif;
       font-size: clamp(34px, 4vw, 52px);
       font-weight: 600;
@@ -461,7 +580,7 @@
         padding-top: 0;
       }
 
-      .section-text h1 {
+      .section-text h2 {
         font-size: clamp(28px, 7vw, 40px);
       }
 
@@ -522,24 +641,27 @@
 </head>
 <body>
   <header class="hero">
-    <div class="hero-eyebrow"><span class="live-dot"></span>Live Market Data</div>
+    <div class="hero-eyebrow"><span class="live-dot" aria-hidden="true"></span>Live Market Data</div>
     <h1 class="hero-title">Buffett<br><em>Index</em></h1>
-    <div class="hero-rule"></div>
+    <div class="hero-rule" aria-hidden="true"></div>
     <p class="hero-desc">Four independent gauges of US market valuation — updated continuously from primary sources.</p>
     <p class="hero-formula">Market Cap / GDP &nbsp;·&nbsp; Shiller CAPE &nbsp;·&nbsp; Fed Model &nbsp;·&nbsp; Corp. Margins</p>
   </header>
 
+  <main id="main-content">
+
+  <section id="buffett-indicator" aria-labelledby="buffett-heading">
   <div class="section-head" style="padding-top: 28px; padding-bottom: 48px;">
-    <span class="section-num">01</span>
+    <span class="section-num" aria-hidden="true">01</span>
     <div class="section-text">
-      <h1>Buffett Indicator</h1>
+      <h2 id="buffett-heading">Buffett Indicator</h2>
       <p>US Total Stock Market Capitalization / Gross Domestic Product</p>
       <span class="formula">Buffett Indicator = Wilshire 5000 Total Market Cap / GDP &nbsp;&mdash;&nbsp; Source: FRED / Federal Reserve Z.1</span>
-      <p class="section-blurb">In 2001, I called this "probably the best single measure of where valuations stand at any given moment." The logic is straightforward: over the long run, corporate profits can't grow faster than the overall economy indefinitely — so when investors are paying $2 for every $1 the economy produces, they're making a very optimistic bet. When this ratio was at 133% in 2001, stocks subsequently lost roughly half their value. It doesn't tell you when the correction comes. It tells you the price you're paying for American business.</p>
+      <p class="section-blurb">In 2001, Warren Buffett called this "probably the best single measure of where valuations stand at any given moment." The logic is straightforward: over the long run, corporate profits can't grow faster than the overall economy indefinitely — so when investors are paying $2 for every $1 the economy produces, they're making a very optimistic bet. When this ratio was at 133% in 2001, stocks subsequently lost roughly half their value. It doesn't tell you when the correction comes. It tells you the price you're paying for American business.</p>
     </div>
   </div>
 
-  <div class="stats-bar" id="stats-bar">
+  <div class="stats-bar" id="stats-bar" role="region" aria-label="Buffett Indicator current readings">
     <div class="stat">
       <div class="stat-label">Current Ratio</div>
       <div class="stat-value" id="current-ratio">--</div>
@@ -587,12 +709,14 @@
     </div>
   </div>
 
+  </section>
+
   <!-- Shiller CAPE Section -->
-  <div class="indicator-section">
+  <section id="shiller-cape" class="indicator-section" aria-labelledby="cape-heading">
     <div class="section-head">
-      <span class="section-num">02</span>
+      <span class="section-num" aria-hidden="true">02</span>
       <div class="section-text">
-        <h1>Shiller CAPE Ratio</h1>
+        <h2 id="cape-heading">Shiller CAPE Ratio</h2>
         <p>Cyclically Adjusted Price-to-Earnings Ratio</p>
         <span class="formula">CAPE = Real S&amp;P 500 Price / 10-Year Average Real Earnings &nbsp;&mdash;&nbsp; Source: Robert Shiller / Yale</span>
         <p class="section-blurb">A price-to-earnings ratio smoothed over 10 years of inflation-adjusted earnings, developed by Nobel laureate Robert Shiller. The 10-year average is the key insight — a single year's earnings can be wildly distorted by recessions or one-time booms, making a standard P/E nearly useless at market extremes. The long-run average is about 17x. At the dot-com peak in early 2000, CAPE reached 44x — stocks then lost roughly half their value over the next two years. It has never stayed above 30x for long without a reckoning following.</p>
@@ -632,16 +756,17 @@
         <div class="source-note">Data: Robert Shiller / Yale &mdash; CAPE since 1881. Values above the +2 SD line have historically preceded significant market corrections.</div>
       </div>
     </div>
-  </div>
+
+  </section>
 
   <!-- Fed Model Section -->
-  <div class="indicator-section">
+  <section id="fed-model" class="indicator-section" aria-labelledby="fedm-heading">
     <div class="section-head">
-      <span class="section-num">03</span>
+      <span class="section-num" aria-hidden="true">03</span>
       <div class="section-text">
-        <h1>Fed Model</h1>
-        <p>Earnings Yield vs. 10-Year Long Interest Rate</p>
-        <span class="formula">Spread = Earnings Yield (1 / CAPE &times; 100) &minus; 10Y Long Interest Rate &nbsp;&mdash;&nbsp; Source: Robert Shiller / Yale</span>
+        <h2 id="fedm-heading">Fed Model</h2>
+        <p>Earnings Yield vs. 10-Year Treasury Yield</p>
+        <span class="formula">Spread = Earnings Yield (1 / CAPE &times; 100) &minus; 10Y Treasury Yield &nbsp;&mdash;&nbsp; Source: Robert Shiller / Yale</span>
         <p class="section-blurb">This compares what the stock market earns — expressed as a yield — against what the US government pays you to lend it money for 10 years. When stocks yield more than bonds, you're being paid to take on equity risk. When bonds yield more, you need a compelling reason to own stocks instead of Treasuries. A deeply negative spread means the risk-free rate has taken back a job it hasn't held in decades. Interest rates are to asset prices what gravity is to the apple.</p>
       </div>
     </div>
@@ -679,14 +804,15 @@
         <div class="source-note">Data: Robert Shiller / Yale &mdash; Positive spread (earnings yield &gt; bond yield) favors stocks; negative favors bonds.</div>
       </div>
     </div>
-  </div>
+
+  </section>
 
   <!-- Corporate Profits / GDP Section -->
-  <div class="indicator-section">
+  <section id="corporate-profits" class="indicator-section" aria-labelledby="cp-heading">
     <div class="section-head">
-      <span class="section-num">04</span>
+      <span class="section-num" aria-hidden="true">04</span>
       <div class="section-text">
-        <h1>Corporate Profits / GDP</h1>
+        <h2 id="cp-heading">Corporate Profits / GDP</h2>
         <p>After-Tax Corporate Profits as a Share of the Economy</p>
         <span class="formula">Profit Margin = After-Tax Corporate Profits (SAAR) / GDP (SAAR) &nbsp;&mdash;&nbsp; Source: FRED / BEA</span>
         <p class="section-blurb">After-tax corporate profits as a share of the entire US economy. Margins mean-revert — they always have, and for an iron reason: high profits attract competition, give labor negotiating leverage, and draw regulatory attention. The historical average is around 6–7% of GDP. When profits are running near 12%, you're betting that something unprecedented will persist. As Charlie Munger put it: "Show me the incentive and I'll show you the outcome." Record margins are a very large incentive for every competitor on earth to take a run at them.</p>
@@ -726,7 +852,6 @@
         <div class="source-note">Data: Federal Reserve Bank of St. Louis (FRED) &mdash; After-Tax Corporate Profits (CP) / GDP. Sustained readings above historical average imply mean-reversion risk.</div>
       </div>
     </div>
-  </div>
 
   <script>
     const FRED_API_BASE = '/api/fred';
@@ -1389,6 +1514,47 @@
       fetchGauges(null);
     });
   </script>
+
+  <noscript>
+    <style>
+      .noscript-notice {
+        background: #0A0C14;
+        border: 1px solid #222638;
+        color: #9895A4;
+        font-family: Georgia, serif;
+        font-size: 14px;
+        line-height: 1.7;
+        max-width: 640px;
+        margin: 40px auto;
+        padding: 32px 40px;
+        text-align: center;
+      }
+      .noscript-notice strong { color: #EAE5DA; }
+    </style>
+    <div class="noscript-notice">
+      <strong>JavaScript is required to display the BuffettIndex dashboard.</strong><br>
+      This page renders four live US stock market valuation gauges — Buffett Indicator, Shiller CAPE, Fed Model, and Corporate Profits/GDP — using real-time data from FRED and Yale. Please enable JavaScript to view the charts.
+    </div>
+  </noscript>
+
+  </section><!-- /corporate-profits -->
+  </main><!-- /main-content -->
+
+  <footer role="contentinfo" style="border-top: 1px solid #14172290; padding: 40px 52px; max-width: 1400px; margin: 0 auto; position: relative; z-index: 2;">
+    <nav aria-label="Page sections">
+      <ul style="list-style: none; display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 20px; padding: 0;">
+        <li><a href="#buffett-indicator" style="font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.1em; color: #6A6878; text-decoration: none; text-transform: uppercase;">Buffett Indicator</a></li>
+        <li><a href="#shiller-cape" style="font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.1em; color: #6A6878; text-decoration: none; text-transform: uppercase;">Shiller CAPE</a></li>
+        <li><a href="#fed-model" style="font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.1em; color: #6A6878; text-decoration: none; text-transform: uppercase;">Fed Model</a></li>
+        <li><a href="#corporate-profits" style="font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.1em; color: #6A6878; text-decoration: none; text-transform: uppercase;">Corporate Profits / GDP</a></li>
+      </ul>
+    </nav>
+    <p style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #6A6878; line-height: 1.7; max-width: 680px;">
+      Data sourced from the <a href="https://fred.stlouisfed.org" rel="noopener noreferrer" style="color: #6A6878;">Federal Reserve Bank of St. Louis (FRED)</a> and <a href="https://shillerdata.com" rel="noopener noreferrer" style="color: #6A6878;">Robert Shiller / Yale</a>.
+      BuffettIndex is an independent research tool. Nothing on this site constitutes investment advice.
+    </p>
+  </footer>
+
   <!-- Cloudflare Web Analytics --><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "4f521527db8d42d9955d86a3167a7176"}'></script><!-- End Cloudflare Web Analytics -->
 </body>
 </html>

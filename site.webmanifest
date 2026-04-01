@@ -1,0 +1,22 @@
+{
+  "name": "BuffettIndex",
+  "short_name": "BuffettIndex",
+  "description": "Live US stock market valuation dashboard — Buffett Indicator, Shiller CAPE, Fed Model, and Corporate Profits/GDP.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#06070D",
+  "theme_color": "#06070D",
+  "icons": [
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

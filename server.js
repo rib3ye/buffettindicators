@@ -153,19 +153,21 @@ function checkRateLimit(ip) {
 // ── Static file helpers ───────────────────────────────────────────────────────
 
 const contentTypes = {
-  ".html": "text/html; charset=utf-8",
-  ".js":   "text/javascript; charset=utf-8",
-  ".css":  "text/css; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".png":  "image/png",
-  ".jpg":  "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".gif":  "image/gif",
-  ".svg":  "image/svg+xml",
-  ".ico":  "image/x-icon",
-  ".txt":  "text/plain; charset=utf-8",
-  ".woff": "font/woff",
-  ".woff2":"font/woff2",
+  ".html":        "text/html; charset=utf-8",
+  ".js":          "text/javascript; charset=utf-8",
+  ".css":         "text/css; charset=utf-8",
+  ".json":        "application/json; charset=utf-8",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
+  ".xml":         "application/xml; charset=utf-8",
+  ".png":         "image/png",
+  ".jpg":         "image/jpeg",
+  ".jpeg":        "image/jpeg",
+  ".gif":         "image/gif",
+  ".svg":         "image/svg+xml",
+  ".ico":         "image/x-icon",
+  ".txt":         "text/plain; charset=utf-8",
+  ".woff":        "font/woff",
+  ".woff2":       "font/woff2",
 };
 
 function resolveFile(requestPath) {
@@ -460,6 +462,18 @@ const requestHandler = (req, res) => {
     ].join("; "),
     "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
   };
+
+  // ── Canonical host redirect ───────────────────────────────────────────────
+  // In production, redirect www → non-www (or adjust to match your preferred canonical).
+  if (process.env.NODE_ENV === "production" && process.env.CANONICAL_HOST) {
+    const host = (req.headers["x-forwarded-host"] || req.headers["host"] || "").toLowerCase();
+    if (host && host !== process.env.CANONICAL_HOST) {
+      const target = `https://${process.env.CANONICAL_HOST}${req.url || "/"}`;
+      res.writeHead(301, { Location: target, ...securityHeaders });
+      res.end();
+      return;
+    }
+  }
 
   if (parsedUrl.pathname === "/api/fred") {
     handleFredRequest(req, res, parsedUrl, securityHeaders);
