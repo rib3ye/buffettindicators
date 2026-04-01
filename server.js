@@ -472,7 +472,7 @@ const requestHandler = (req, res) => {
   }
 
   handleStaticFile(req, res, securityHeaders);
-});
+};
 
 const server = tlsOptions
   ? https.createServer(tlsOptions, requestHandler)
