@@ -1,0 +1,1393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Buffett Indicator - US Stock Market Value to GDP</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garant:ital,wght@0,400;0,600;1,400;1,600&family=JetBrains+Mono:wght@300;400;500&family=DM+Sans:opsz,wght@9..40,300;9..40,400&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" integrity="sha384-vsrfeLOOY6KuIYKDlmVH5UiBmgIdB1oEf7p01YgWHuqmOHfZr374+odEv96n9tNC" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js" integrity="sha384-dwwI6ICEN/0ZQlS5owhUa/6ZzvwUPmjH45bFVCAcjgjTulbHJvlE+TGU3g1k0N3R" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js" integrity="sha384-cVMg8E3QFwTvGCDuK+ET4PD341jF3W8nO1auiXfuZNQkzbUUiBGLsIQUE+b1mxws" crossorigin="anonymous"></script>
+  <style>
+    :root {
+      --bg:           #06070D;
+      --surface:      #0A0C14;
+      --surface-2:    #0E1018;
+      --border:       #14172200;
+      --border-vis:   #14172290;
+      --border-2:     #222638;
+      --text:         #EAE5DA;
+      --text-mid:     #9895A4;
+      --text-dim:     #6A6878;
+      --amber:        #C8902A;
+      --amber-bright: #E6A634;
+      --green:        #27B87A;
+      --cobalt:       #4192F2;
+      --crimson:      #D63E3E;
+    }
+
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html { font-size: 16px; scroll-behavior: smooth; }
+
+    body {
+      font-family: 'DM Sans', -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* dot-grid atmosphere */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: radial-gradient(circle, #1E2030 1px, transparent 1px);
+      background-size: 36px 36px;
+      opacity: 0.28;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* film grain */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.72' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23g)' opacity='0.45'/%3E%3C/svg%3E");
+      opacity: 0.038;
+      pointer-events: none;
+      z-index: 1;
+      mix-blend-mode: screen;
+    }
+
+    /* ── HERO ───────────────────────────────── */
+    .hero {
+      padding: 80px 52px 40px;
+      max-width: 1400px;
+      margin: 0 auto;
+      position: relative;
+      z-index: 2;
+    }
+
+    .hero-eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--text-mid);
+      margin-bottom: 22px;
+    }
+
+    .live-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 10px var(--green);
+      animation: livepulse 2.8s ease-in-out infinite;
+      flex-shrink: 0;
+    }
+
+    @keyframes livepulse {
+      0%, 100% { opacity: 1;   box-shadow: 0 0 10px var(--green); }
+      50%       { opacity: 0.4; box-shadow: 0 0 3px  var(--green); }
+    }
+
+    .hero-title {
+      font-family: 'Cormorant Garant', Georgia, serif;
+      font-size: clamp(60px, 9vw, 108px);
+      font-weight: 600;
+      line-height: 0.9;
+      letter-spacing: -0.02em;
+      color: var(--text);
+      margin-bottom: 28px;
+    }
+
+    .hero-title em {
+      font-style: italic;
+      color: var(--amber);
+    }
+
+    .hero-rule {
+      width: 48px;
+      height: 1px;
+      background: var(--amber);
+      margin-bottom: 20px;
+      opacity: 0.8;
+    }
+
+    .hero-desc {
+      font-size: 14px;
+      color: var(--text-mid);
+      line-height: 1.65;
+      max-width: 520px;
+      margin-bottom: 10px;
+    }
+
+    .hero-formula {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text-mid);
+      letter-spacing: 0.04em;
+    }
+
+    /* ── STATS BAR ──────────────────────────── */
+    .stats-bar {
+      display: flex;
+      gap: 12px;
+      padding: 0 52px 56px;
+      max-width: 1400px;
+      margin: 0 auto;
+      flex-wrap: wrap;
+      position: relative;
+      z-index: 2;
+    }
+
+    .stat {
+      background: var(--surface);
+      border: 1px solid var(--border-vis);
+      border-left: 2px solid var(--border-2);
+      padding: 22px 28px 18px;
+      flex: 1;
+      min-width: 170px;
+      position: relative;
+      transition: border-left-color 0.5s ease;
+    }
+
+    .stat-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--text-mid);
+      margin-bottom: 12px;
+    }
+
+    .stat-value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 34px;
+      font-weight: 400;
+      color: var(--text);
+      line-height: 1;
+      letter-spacing: -0.03em;
+      transition: color 0.4s ease;
+    }
+
+    .stat-value.overvalued  { color: var(--amber-bright); }
+    .stat-value.fair        { color: var(--green); }
+    .stat-value.undervalued { color: var(--cobalt); }
+
+    .stat-sub {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: var(--text-mid);
+      margin-top: 9px;
+      letter-spacing: 0.02em;
+    }
+
+    /* ── CHART CONTAINERS ───────────────────── */
+    .chart-container {
+      padding: 0 52px 88px;
+      max-width: 1400px;
+      margin: 0 auto;
+      position: relative;
+      z-index: 2;
+    }
+
+    .chart-wrapper {
+      background: var(--surface);
+      border: 1px solid var(--border-vis);
+      border-radius: 2px;
+      padding: 28px 28px 18px;
+      position: relative;
+    }
+
+    .canvas-area {
+      position: relative;
+      width: 100%;
+    }
+
+    .canvas-area canvas { width: 100% !important; }
+
+    /* ── LEGEND ─────────────────────────────── */
+    .legend-custom {
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+      padding-left: 2px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text-mid);
+      cursor: pointer;
+      user-select: none;
+      letter-spacing: 0.03em;
+      transition: color 0.15s;
+    }
+
+    .legend-item:hover { color: var(--text); }
+
+    .legend-swatch {
+      width: 18px;
+      height: 2px;
+      border-radius: 1px;
+      flex-shrink: 0;
+    }
+
+    .legend-swatch.dashed {
+      background: repeating-linear-gradient(90deg, var(--color) 0, var(--color) 4px, transparent 4px, transparent 8px);
+    }
+
+    /* ── LOADING ────────────────────────────── */
+    .loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 400px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: var(--text-mid);
+      letter-spacing: 0.08em;
+      gap: 14px;
+    }
+
+    .loading .spinner {
+      width: 16px;
+      height: 16px;
+      border: 1.5px solid var(--border-2);
+      border-top-color: var(--amber);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      flex-shrink: 0;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .error {
+      color: var(--crimson);
+      padding: 24px;
+      text-align: center;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      letter-spacing: 0.06em;
+    }
+
+    /* ── CONTROLS ───────────────────────────── */
+    .controls {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 18px;
+      justify-content: flex-end;
+    }
+
+    .controls button {
+      background: transparent;
+      border: 1px solid var(--border-2);
+      color: var(--text-mid);
+      padding: 5px 16px;
+      border-radius: 100px;
+      cursor: pointer;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      transition: all 0.15s;
+    }
+
+    .controls button:hover {
+      border-color: var(--text-mid);
+      color: var(--text-mid);
+    }
+
+    .controls button.active {
+      background: var(--amber);
+      border-color: var(--amber);
+      color: var(--bg);
+      font-weight: 500;
+    }
+
+    /* ── FOOTER NOTES ───────────────────────── */
+    .source-note {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 18px;
+      padding-left: 2px;
+      letter-spacing: 0.03em;
+    }
+
+    .tooltip-note {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 6px;
+      padding-left: 2px;
+      letter-spacing: 0.03em;
+    }
+
+    /* ── INDICATOR SECTIONS ─────────────────── */
+    .indicator-section {
+      border-top: 1px solid var(--border-vis);
+      position: relative;
+      z-index: 2;
+    }
+
+    .section-head {
+      padding: 88px 52px 0;
+      max-width: 1400px;
+      margin: 0 auto;
+      display: flex;
+      align-items: flex-start;
+      gap: 32px;
+      position: relative;
+    }
+
+    .section-num {
+      font-family: 'Cormorant Garant', Georgia, serif;
+      font-size: 100px;
+      font-weight: 600;
+      line-height: 1;
+      color: var(--border-2);
+      letter-spacing: -0.04em;
+      flex-shrink: 0;
+      user-select: none;
+      margin-top: -8px;
+    }
+
+    .section-text {
+      padding-top: 8px;
+    }
+
+    .section-text h1 {
+      font-family: 'Cormorant Garant', Georgia, serif;
+      font-size: clamp(34px, 4vw, 52px);
+      font-weight: 600;
+      color: var(--text);
+      line-height: 1;
+      letter-spacing: -0.015em;
+      margin-bottom: 8px;
+    }
+
+    .section-text p {
+      font-size: 13px;
+      color: var(--text-mid);
+      margin-bottom: 6px;
+    }
+
+    .section-text .formula {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text-mid);
+      letter-spacing: 0.03em;
+    }
+
+    .section-blurb {
+      font-size: 14px;
+      color: var(--text-mid);
+      line-height: 1.7;
+      max-width: 700px;
+      margin-top: 20px;
+      margin-bottom: 8px;
+    }
+
+    /* ── RESPONSIVE ─────────────────────────── */
+    @media (max-width: 768px) {
+      .canvas-area {
+        height: 300px !important;
+      }
+
+      .canvas-area canvas {
+        height: 300px !important;
+      }
+
+      .hero {
+        padding: 52px 20px 32px;
+      }
+
+      .hero-title {
+        font-size: clamp(52px, 14vw, 80px);
+        line-height: 0.92;
+      }
+
+      .stats-bar {
+        padding: 0 20px 44px;
+        gap: 8px;
+      }
+
+      .stat {
+        flex: 1 1 calc(50% - 4px);
+        min-width: 0;
+        padding: 18px 16px 14px;
+      }
+
+      .stat-value {
+        font-size: 26px;
+      }
+
+      .chart-container {
+        padding: 0 20px 64px;
+      }
+
+      .chart-wrapper {
+        padding: 20px 16px 14px;
+      }
+
+      .section-head {
+        padding: 56px 20px 0;
+        flex-direction: column;
+        gap: 0;
+      }
+
+      .section-num {
+        font-size: 56px;
+        margin-top: 0;
+        margin-bottom: -4px;
+        line-height: 1;
+      }
+
+      .section-text {
+        padding-top: 0;
+      }
+
+      .section-text h1 {
+        font-size: clamp(28px, 7vw, 40px);
+      }
+
+      .section-blurb {
+        font-size: 13px;
+      }
+
+      .controls {
+        flex-wrap: wrap;
+        justify-content: flex-start;
+        gap: 4px;
+      }
+
+      .controls button {
+        padding: 5px 12px;
+        font-size: 10px;
+      }
+
+      .legend-custom {
+        gap: 12px;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .canvas-area {
+        height: 260px !important;
+      }
+
+      .canvas-area canvas {
+        height: 260px !important;
+      }
+
+      .hero {
+        padding: 44px 16px 28px;
+      }
+
+      .stats-bar {
+        padding: 0 16px 36px;
+      }
+
+      .stat {
+        flex: 1 1 100%;
+      }
+
+      .chart-container {
+        padding: 0 16px 52px;
+      }
+
+      .chart-wrapper {
+        padding: 16px 12px 12px;
+      }
+
+      .section-head {
+        padding: 48px 16px 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-eyebrow"><span class="live-dot"></span>Live Market Data</div>
+    <h1 class="hero-title">Buffett<br><em>Index</em></h1>
+    <div class="hero-rule"></div>
+    <p class="hero-desc">Four independent gauges of US market valuation — updated continuously from primary sources.</p>
+    <p class="hero-formula">Market Cap / GDP &nbsp;·&nbsp; Shiller CAPE &nbsp;·&nbsp; Fed Model &nbsp;·&nbsp; Corp. Margins</p>
+  </header>
+
+  <div class="section-head" style="padding-top: 28px; padding-bottom: 48px;">
+    <span class="section-num">01</span>
+    <div class="section-text">
+      <h1>Buffett Indicator</h1>
+      <p>US Total Stock Market Capitalization / Gross Domestic Product</p>
+      <span class="formula">Buffett Indicator = Wilshire 5000 Total Market Cap / GDP &nbsp;&mdash;&nbsp; Source: FRED / Federal Reserve Z.1</span>
+      <p class="section-blurb">In 2001, I called this "probably the best single measure of where valuations stand at any given moment." The logic is straightforward: over the long run, corporate profits can't grow faster than the overall economy indefinitely — so when investors are paying $2 for every $1 the economy produces, they're making a very optimistic bet. When this ratio was at 133% in 2001, stocks subsequently lost roughly half their value. It doesn't tell you when the correction comes. It tells you the price you're paying for American business.</p>
+    </div>
+  </div>
+
+  <div class="stats-bar" id="stats-bar">
+    <div class="stat">
+      <div class="stat-label">Current Ratio</div>
+      <div class="stat-value" id="current-ratio">--</div>
+      <div class="stat-sub" id="current-date">Loading...</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Trend Line</div>
+      <div class="stat-value" id="trend-value">--</div>
+      <div class="stat-sub">Historical trend</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Deviation from Trend</div>
+      <div class="stat-value" id="deviation-value">--</div>
+      <div class="stat-sub" id="deviation-label">--</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Historical Mean</div>
+      <div class="stat-value" id="mean-value">--</div>
+      <div class="stat-sub">Since 1970</div>
+    </div>
+  </div>
+
+
+  <div class="chart-container">
+    <div class="chart-wrapper">
+      <div class="legend-custom" id="custom-legend"></div>
+      <div class="controls">
+        <button data-range="10">10Y</button>
+        <button data-range="20">20Y</button>
+        <button data-range="30">30Y</button>
+        <button data-range="all" class="active">All</button>
+        <button id="reset-zoom">Reset Zoom</button>
+      </div>
+      <div id="loading" class="loading">
+        <div class="spinner"></div>
+        Fetching data from FRED...
+      </div>
+      <div class="canvas-area">
+        <canvas id="buffett-chart" style="display:none;"></canvas>
+      </div>
+      <div class="tooltip-note">Scroll to zoom, drag to pan</div>
+      <div class="source-note">
+        Data: Federal Reserve Bank of St. Louis (FRED) &mdash; Total US Equity Market Cap / Fed Z.1 Flow of Funds (NCBEILQ027S) &amp; GDP (GDP).
+      </div>
+    </div>
+  </div>
+
+  <!-- Shiller CAPE Section -->
+  <div class="indicator-section">
+    <div class="section-head">
+      <span class="section-num">02</span>
+      <div class="section-text">
+        <h1>Shiller CAPE Ratio</h1>
+        <p>Cyclically Adjusted Price-to-Earnings Ratio</p>
+        <span class="formula">CAPE = Real S&amp;P 500 Price / 10-Year Average Real Earnings &nbsp;&mdash;&nbsp; Source: Robert Shiller / Yale</span>
+        <p class="section-blurb">A price-to-earnings ratio smoothed over 10 years of inflation-adjusted earnings, developed by Nobel laureate Robert Shiller. The 10-year average is the key insight — a single year's earnings can be wildly distorted by recessions or one-time booms, making a standard P/E nearly useless at market extremes. The long-run average is about 17x. At the dot-com peak in early 2000, CAPE reached 44x — stocks then lost roughly half their value over the next two years. It has never stayed above 30x for long without a reckoning following.</p>
+      </div>
+    </div>
+    <div class="stats-bar">
+      <div class="stat">
+        <div class="stat-label">Current CAPE</div>
+        <div class="stat-value" id="cape-current">--</div>
+        <div class="stat-sub" id="cape-current-sub">Loading...</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Historical Average</div>
+        <div class="stat-value" id="cape-avg">--</div>
+        <div class="stat-sub">Since 1881</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">% vs. Average</div>
+        <div class="stat-value" id="cape-deviation">--</div>
+        <div class="stat-sub" id="cape-deviation-label">--</div>
+      </div>
+    </div>
+    <div class="chart-container">
+      <div class="chart-wrapper">
+        <div class="legend-custom" id="cape-legend"></div>
+        <div class="controls">
+          <button data-cape-range="20">20Y</button>
+          <button data-cape-range="50">50Y</button>
+          <button data-cape-range="all" class="active">All</button>
+          <button id="cape-reset-zoom">Reset Zoom</button>
+        </div>
+        <div id="cape-loading" class="loading"><div class="spinner"></div>Fetching CAPE data...</div>
+        <div class="canvas-area">
+          <canvas id="cape-chart" style="display:none;"></canvas>
+        </div>
+        <div class="tooltip-note">Scroll to zoom, drag to pan</div>
+        <div class="source-note">Data: Robert Shiller / Yale &mdash; CAPE since 1881. Values above the +2 SD line have historically preceded significant market corrections.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Fed Model Section -->
+  <div class="indicator-section">
+    <div class="section-head">
+      <span class="section-num">03</span>
+      <div class="section-text">
+        <h1>Fed Model</h1>
+        <p>Earnings Yield vs. 10-Year Long Interest Rate</p>
+        <span class="formula">Spread = Earnings Yield (1 / CAPE &times; 100) &minus; 10Y Long Interest Rate &nbsp;&mdash;&nbsp; Source: Robert Shiller / Yale</span>
+        <p class="section-blurb">This compares what the stock market earns — expressed as a yield — against what the US government pays you to lend it money for 10 years. When stocks yield more than bonds, you're being paid to take on equity risk. When bonds yield more, you need a compelling reason to own stocks instead of Treasuries. A deeply negative spread means the risk-free rate has taken back a job it hasn't held in decades. Interest rates are to asset prices what gravity is to the apple.</p>
+      </div>
+    </div>
+    <div class="stats-bar">
+      <div class="stat">
+        <div class="stat-label">Earnings Yield</div>
+        <div class="stat-value" id="fedm-earnings-yield">--</div>
+        <div class="stat-sub">1 / CAPE &times; 100</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">10Y Interest Rate</div>
+        <div class="stat-value" id="fedm-bond-yield">--</div>
+        <div class="stat-sub" id="fedm-bond-sub">Loading...</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Spread</div>
+        <div class="stat-value" id="fedm-spread">--</div>
+        <div class="stat-sub" id="fedm-spread-label">--</div>
+      </div>
+    </div>
+    <div class="chart-container">
+      <div class="chart-wrapper">
+        <div class="legend-custom" id="fedm-legend"></div>
+        <div class="controls">
+          <button data-fedm-range="20">20Y</button>
+          <button data-fedm-range="50">50Y</button>
+          <button data-fedm-range="all" class="active">All</button>
+          <button id="fedm-reset-zoom">Reset Zoom</button>
+        </div>
+        <div id="fedm-loading" class="loading"><div class="spinner"></div>Fetching Fed Model data...</div>
+        <div class="canvas-area">
+          <canvas id="fedm-chart" style="display:none;"></canvas>
+        </div>
+        <div class="tooltip-note">Scroll to zoom, drag to pan</div>
+        <div class="source-note">Data: Robert Shiller / Yale &mdash; Positive spread (earnings yield &gt; bond yield) favors stocks; negative favors bonds.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Corporate Profits / GDP Section -->
+  <div class="indicator-section">
+    <div class="section-head">
+      <span class="section-num">04</span>
+      <div class="section-text">
+        <h1>Corporate Profits / GDP</h1>
+        <p>After-Tax Corporate Profits as a Share of the Economy</p>
+        <span class="formula">Profit Margin = After-Tax Corporate Profits (SAAR) / GDP (SAAR) &nbsp;&mdash;&nbsp; Source: FRED / BEA</span>
+        <p class="section-blurb">After-tax corporate profits as a share of the entire US economy. Margins mean-revert — they always have, and for an iron reason: high profits attract competition, give labor negotiating leverage, and draw regulatory attention. The historical average is around 6–7% of GDP. When profits are running near 12%, you're betting that something unprecedented will persist. As Charlie Munger put it: "Show me the incentive and I'll show you the outcome." Record margins are a very large incentive for every competitor on earth to take a run at them.</p>
+      </div>
+    </div>
+    <div class="stats-bar">
+      <div class="stat">
+        <div class="stat-label">Current Ratio</div>
+        <div class="stat-value" id="cp-current">--</div>
+        <div class="stat-sub" id="cp-current-sub">Loading...</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Historical Average</div>
+        <div class="stat-value" id="cp-avg">--</div>
+        <div class="stat-sub">Since 1947</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">% vs. Average</div>
+        <div class="stat-value" id="cp-deviation">--</div>
+        <div class="stat-sub" id="cp-deviation-label">--</div>
+      </div>
+    </div>
+    <div class="chart-container">
+      <div class="chart-wrapper">
+        <div class="legend-custom" id="cp-legend"></div>
+        <div class="controls">
+          <button data-cp-range="20">20Y</button>
+          <button data-cp-range="40">40Y</button>
+          <button data-cp-range="all" class="active">All</button>
+          <button id="cp-reset-zoom">Reset Zoom</button>
+        </div>
+        <div id="cp-loading" class="loading"><div class="spinner"></div>Fetching data from FRED...</div>
+        <div class="canvas-area">
+          <canvas id="cp-chart" style="display:none;"></canvas>
+        </div>
+        <div class="tooltip-note">Scroll to zoom, drag to pan</div>
+        <div class="source-note">Data: Federal Reserve Bank of St. Louis (FRED) &mdash; After-Tax Corporate Profits (CP) / GDP. Sustained readings above historical average imply mean-reversion risk.</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const FRED_API_BASE = '/api/fred';
+    const MS_PER_YEAR = 365.25 * 24 * 3600 * 1000;
+    const MS_PER_DAY = 24 * 3600 * 1000;
+
+    function toQuarterKey(date) {
+      return `${date.getFullYear()}-Q${Math.floor(date.getMonth() / 3)}`;
+    }
+
+    async function fetchFredSeries(seriesId, startDate = '1970-01-01', frequency = 'Quarterly') {
+      const freqMap = { 'Quarterly': 'q', 'Daily': 'd', 'Annual': 'a', 'Monthly': 'm' };
+      const freq = freqMap[frequency] || 'q';
+      const url = `${FRED_API_BASE}?series_id=${seriesId}&observation_start=${startDate}&frequency=${freq}`;
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`Failed to fetch ${seriesId}: ${resp.status}`);
+      const json = await resp.json();
+      const data = [];
+      for (const obs of json.observations || []) {
+        const val = parseFloat(obs.value);
+        if (!isNaN(val) && obs.value !== '.') {
+          data.push({ date: new Date(obs.date), value: val });
+        }
+      }
+      return data;
+    }
+
+    function linearRegression(points) {
+      const n = points.length;
+      let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+      for (const { x, y } of points) {
+        sumX += x;
+        sumY += y;
+        sumXY += x * y;
+        sumXX += x * x;
+      }
+      const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
+      const intercept = (sumY - slope * sumX) / n;
+      return { slope, intercept };
+    }
+
+    function exponentialRegression(points) {
+      // Fit log(y) = a + b*x  =>  y = exp(a) * exp(b*x)
+      const logPoints = points.filter(p => p.y > 0).map(p => ({ x: p.x, y: Math.log(p.y) }));
+      const { slope, intercept } = linearRegression(logPoints);
+      return { a: Math.exp(intercept), b: slope };
+    }
+
+    async function fetchBuffettData(prefetchedGdpData) {
+      try {
+        // NCBEILQ027S: Nonfinancial Corporate Business; Corporate Equities; Liability, Level (millions USD)
+        // GDP is in billions (SAAR). Market cap is in millions — divide by 1000 to get billions.
+        const fetchGdp = prefetchedGdpData
+          ? Promise.resolve(prefetchedGdpData)
+          : fetchFredSeries('GDP', '1945-01-01');
+        const [marketCapData, gdpData] = await Promise.all([
+          fetchFredSeries('NCBEILQ027S', '1945-01-01'),
+          fetchGdp,
+        ]);
+        const gdpMap = new Map();
+        for (const d of gdpData) gdpMap.set(toQuarterKey(d.date), d.value);
+        const ratioData = [];
+        for (const w of marketCapData) {
+          const gdpVal = gdpMap.get(toQuarterKey(w.date));
+          if (gdpVal && gdpVal > 0) {
+            ratioData.push({ date: w.date, ratio: (w.value / 1000 / gdpVal) * 100 });
+          }
+        }
+        return { ratioData, usedFallbackSeries: false };
+      } catch (_) {
+        const fallback = await fetchFredSeries('DDDM01USA156NWDB', '1975-01-01', 'Annual');
+        return { ratioData: fallback.map(d => ({ date: d.date, ratio: d.value })), usedFallbackSeries: true };
+      }
+    }
+
+    function computeBuffettTrend(ratioData) {
+      const t0 = ratioData[0].date.getTime();
+      const points = ratioData.map(d => ({ x: (d.date.getTime() - t0) / MS_PER_YEAR, y: d.ratio }));
+      const { a, b } = exponentialRegression(points);
+      const logResiduals = points.map(p => Math.log(p.y) - (Math.log(a) + b * p.x));
+      const meanLogResid = logResiduals.reduce((s, r) => s + r, 0) / logResiduals.length;
+      const stdLogResid = Math.sqrt(
+        logResiduals.reduce((s, r) => s + (r - meanLogResid) ** 2, 0) / logResiduals.length
+      );
+      const lastDate = ratioData[ratioData.length - 1].date;
+      const startDate = ratioData[0].date;
+      const endTime = new Date(lastDate.getTime() + 2 * MS_PER_YEAR);
+      const totalDays = (endTime.getTime() - startDate.getTime()) / MS_PER_DAY;
+      const trendData = [], plus1SD = [], plus2SD = [], minus1SD = [], minus2SD = [];
+      for (let d = 0; d <= totalDays; d += 30) {
+        const date = new Date(startDate.getTime() + d * MS_PER_DAY);
+        const x = (d * MS_PER_DAY) / MS_PER_YEAR;
+        const trendVal = a * Math.exp(b * x);
+        trendData.push({ x: date, y: trendVal });
+        plus1SD.push({ x: date, y: trendVal * Math.exp(stdLogResid) });
+        plus2SD.push({ x: date, y: trendVal * Math.exp(2 * stdLogResid) });
+        minus1SD.push({ x: date, y: trendVal * Math.exp(-stdLogResid) });
+        minus2SD.push({ x: date, y: trendVal * Math.exp(-2 * stdLogResid) });
+      }
+      const trendByTimestamp = new Map(trendData.map(p => [p.x.getTime(), p.y]));
+      return { t0, a, b, stdLogResid, trendData, plus1SD, plus2SD, minus1SD, minus2SD, trendByTimestamp, startDate, endTime, lastDate };
+    }
+
+    async function fetchCurrentEstimate(latest) {
+      try {
+        const sp500Data = await fetchFredSeries('SP500', '1970-01-01', 'Daily');
+        const latestSp500 = sp500Data[sp500Data.length - 1];
+        const sp500AtLatestQuarter = [...sp500Data].reverse().find(d => d.date <= latest.date);
+        if (latestSp500 && sp500AtLatestQuarter && sp500AtLatestQuarter.value > 0) {
+          const scale = latestSp500.value / sp500AtLatestQuarter.value;
+          return {
+            currentPoint: { date: latestSp500.date, ratio: latest.ratio * scale, estimated: true },
+            estimatedChartData: sp500Data
+              .filter(d => d.date >= latest.date)
+              .map(d => ({ x: d.date, y: latest.ratio * (d.value / sp500AtLatestQuarter.value) })),
+          };
+        }
+      } catch (_) {
+        // If daily series is unavailable, fall through to quarterly latest point.
+      }
+      return { currentPoint: { date: latest.date, ratio: latest.ratio, estimated: false }, estimatedChartData: [] };
+    }
+
+    function renderBuffettStats({ currentPoint, latestTrend, stdLogResid, meanRatio }) {
+      document.getElementById('current-ratio').textContent = currentPoint.ratio.toFixed(0) + '%';
+      document.getElementById('current-ratio').className =
+        'stat-value ' + (currentPoint.ratio > latestTrend * Math.exp(stdLogResid) ? 'overvalued' :
+          currentPoint.ratio < latestTrend * Math.exp(-stdLogResid) ? 'undervalued' : 'fair');
+      document.getElementById('current-date').textContent =
+        currentPoint.date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) +
+        (currentPoint.estimated ? ' (daily estimate)' : '');
+      document.getElementById('trend-value').textContent = latestTrend.toFixed(0) + '%';
+      const deviationPct = (currentPoint.ratio - latestTrend) / latestTrend * 100;
+      document.getElementById('deviation-value').textContent =
+        (deviationPct >= 0 ? '+' : '') + deviationPct.toFixed(0) + '%';
+      document.getElementById('deviation-value').className =
+        'stat-value ' + (deviationPct > 30 ? 'overvalued' : deviationPct < -30 ? 'undervalued' : 'fair');
+      document.getElementById('deviation-label').textContent =
+        deviationPct > 50 ? 'Significantly overvalued' :
+        deviationPct > 20 ? 'Overvalued' :
+        deviationPct > -20 ? 'Fair value range' :
+        deviationPct > -50 ? 'Undervalued' : 'Significantly undervalued';
+      document.getElementById('mean-value').textContent = meanRatio.toFixed(0) + '%';
+    }
+
+    function renderBuffettChart({ ratioData, trendData, plus1SD, plus2SD, minus1SD, minus2SD, estimatedChartData, trendByTimestamp, startDate, endTime, lastDate }) {
+      const loadingEl = document.getElementById('loading');
+      const canvasEl = document.getElementById('buffett-chart');
+      loadingEl.style.display = 'none';
+      canvasEl.style.display = 'block';
+
+      const chart = new Chart(canvasEl.getContext('2d'), {
+        type: 'line',
+        data: {
+          datasets: [
+            { label: 'Buffett Indicator', data: ratioData.map(d => ({ x: d.date, y: d.ratio })), borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.08)', borderWidth: 2, pointRadius: 0, pointHoverRadius: 5, pointHoverBackgroundColor: '#3b82f6', fill: false, tension: 0.1, order: 0 },
+            { label: 'Estimated (S&P 500)', data: estimatedChartData, borderColor: '#3b82f6', borderWidth: 2, borderDash: [5, 4], pointRadius: 0, pointHoverRadius: 5, pointHoverBackgroundColor: '#3b82f6', fill: false, tension: 0.1, order: 0 },
+            { label: 'Historical Trend', data: trendData, borderColor: '#888', borderWidth: 1.5, borderDash: [8, 4], pointRadius: 0, pointHoverRadius: 0, fill: false, order: 1 },
+            { label: '+1 Std Dev', data: plus1SD, borderColor: '#f59e0b', borderWidth: 1.2, borderDash: [6, 4], pointRadius: 0, pointHoverRadius: 0, fill: false, order: 2 },
+            { label: '+2 Std Dev', data: plus2SD, borderColor: '#ef4444', borderWidth: 1.2, borderDash: [6, 4], pointRadius: 0, pointHoverRadius: 0, fill: false, order: 3 },
+            { label: '-1 Std Dev', data: minus1SD, borderColor: '#22c55e', borderWidth: 1.2, borderDash: [6, 4], pointRadius: 0, pointHoverRadius: 0, fill: false, order: 4 },
+            { label: '-2 Std Dev', data: minus2SD, borderColor: '#16a34a', borderWidth: 1.2, borderDash: [6, 4], pointRadius: 0, pointHoverRadius: 0, fill: false, order: 5 },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: '#0A0C14', titleColor: '#E4DED3', bodyColor: '#5A5870',
+              borderColor: '#222638', borderWidth: 1, padding: 14, displayColors: true,
+              titleFont: { family: "'JetBrains Mono', monospace", size: 11 },
+              bodyFont: { family: "'JetBrains Mono', monospace", size: 11 },
+              callbacks: {
+                title(items) {
+                  if (!items.length) return '';
+                  return new Date(items[0].parsed.x).toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+                },
+                label(item) {
+                  const value = item.parsed.y;
+                  const label = item.dataset.label;
+                  if (label.includes('Std Dev')) {
+                    const trendValue = trendByTimestamp.get(new Date(item.parsed.x).getTime());
+                    if (typeof trendValue === 'number') {
+                      const spread = value - trendValue;
+                      return ` ${label}: ${value.toFixed(1)}% (actual, ${spread >= 0 ? '+' : ''}${spread.toFixed(1)} pts vs trend)`;
+                    }
+                  }
+                  if (label === 'Buffett Indicator') return ` ${label}: ${value.toFixed(1)}% (actual)`;
+                  return ` ${label}: ${value.toFixed(1)}%`;
+                },
+              },
+            },
+            zoom: {
+              limits: { x: { min: startDate.getTime(), max: endTime.getTime() } },
+              pan: { enabled: true, mode: 'x' },
+              zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' },
+            },
+          },
+          scales: {
+            x: {
+              type: 'time',
+              time: { unit: 'year', displayFormats: { year: 'yyyy' } },
+              grid: { color: '#0C0E16' },
+              ticks: { color: '#2E2C38', maxTicksLimit: 15, font: { family: "'JetBrains Mono', monospace", size: 11 } },
+              border: { color: '#14172200' },
+            },
+            y: {
+              beginAtZero: true,
+              grid: { color: '#0C0E16' },
+              ticks: { color: '#2E2C38', callback: v => v + '%', font: { family: "'JetBrains Mono', monospace", size: 11 } },
+              title: { display: true, text: 'Market Cap / GDP (%)', color: '#2E2C38', font: { family: "'JetBrains Mono', monospace", size: 11 } },
+              border: { color: '#14172200' },
+            },
+          },
+        },
+      });
+
+      canvasEl.parentElement.style.height = '500px';
+      canvasEl.style.height = '500px';
+      chart.resize();
+
+      const legendColors = {
+        'Buffett Indicator': { color: '#3b82f6', dashed: false },
+        'Historical Trend': { color: '#888', dashed: true },
+        '+1 Std Dev': { color: '#f59e0b', dashed: true },
+        '+2 Std Dev': { color: '#ef4444', dashed: true },
+        '-1 Std Dev': { color: '#22c55e', dashed: true },
+        '-2 Std Dev': { color: '#16a34a', dashed: true },
+      };
+      const legendEl = document.getElementById('custom-legend');
+      chart.data.datasets.forEach((ds, i) => {
+        const item = document.createElement('div');
+        item.className = 'legend-item';
+        const info = legendColors[ds.label] || { color: ds.borderColor, dashed: false };
+        const swatch = document.createElement('span');
+        swatch.className = 'legend-swatch' + (info.dashed ? ' dashed' : '');
+        swatch.style.setProperty('--color', info.color);
+        if (!info.dashed) swatch.style.background = info.color;
+        item.appendChild(swatch);
+        item.appendChild(document.createTextNode(ds.label));
+        item.addEventListener('click', () => {
+          const meta = chart.getDatasetMeta(i);
+          meta.hidden = !meta.hidden;
+          item.style.opacity = meta.hidden ? 0.4 : 1;
+          chart.update();
+        });
+        legendEl.appendChild(item);
+      });
+
+      document.querySelectorAll('[data-range]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('[data-range]').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          const range = btn.dataset.range;
+          if (range === 'all') {
+            chart.resetZoom();
+          } else {
+            const now = lastDate.getTime();
+            chart.zoomScale('x', { min: now - parseInt(range) * MS_PER_YEAR, max: now + 30 * MS_PER_DAY });
+          }
+        });
+      });
+
+      document.getElementById('reset-zoom').addEventListener('click', () => {
+        chart.resetZoom();
+        document.querySelectorAll('[data-range]').forEach(b => b.classList.remove('active'));
+        document.querySelector('[data-range="all"]').classList.add('active');
+      });
+    }
+
+    async function main(prefetchedGdpData) {
+      const loadingEl = document.getElementById('loading');
+
+      try {
+        const { ratioData, usedFallbackSeries } = await fetchBuffettData(prefetchedGdpData);
+        if (ratioData.length === 0) throw new Error('No data points computed');
+        if (usedFallbackSeries) {
+          document.querySelector('.source-note').textContent =
+            'Data: Federal Reserve Bank of St. Louis (FRED) \u2014 Stock Market Capitalization to GDP for United States (DDDM01USA156NWDB).';
+        }
+
+        const trend = computeBuffettTrend(ratioData);
+        const { currentPoint, estimatedChartData } = await fetchCurrentEstimate(ratioData[ratioData.length - 1]);
+
+        const latestX = (currentPoint.date.getTime() - trend.t0) / MS_PER_YEAR;
+        const latestTrend = trend.a * Math.exp(trend.b * latestX);
+        const meanRatio = ratioData.reduce((s, d) => s + d.ratio, 0) / ratioData.length;
+
+        renderBuffettStats({ currentPoint, latestTrend, stdLogResid: trend.stdLogResid, meanRatio });
+        renderBuffettChart({ ratioData, estimatedChartData, ...trend });
+
+      } catch (err) {
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'error';
+        const p1 = document.createElement('p');
+        p1.textContent = 'Error loading data: ' + (err.message || 'Unknown error');
+        const p2 = document.createElement('p');
+        p2.style.cssText = 'margin-top:8px;font-size:13px;color:#888';
+        p2.textContent = 'This page fetches live data from FRED. Make sure you have internet access. If the issue persists, FRED\'s API may be temporarily unavailable.';
+        errorDiv.appendChild(p1);
+        errorDiv.appendChild(p2);
+        loadingEl.replaceChildren(errorDiv);
+      }
+    }
+
+    async function fetchShillerHistory() {
+      const resp = await fetch('/api/shiller');
+      if (!resp.ok) throw new Error('Shiller history fetch failed: ' + resp.status);
+      const json = await resp.json();
+      if (!json || !Array.isArray(json.data)) throw new Error('Shiller data: unexpected format');
+      const validated = json.data.filter(r =>
+        r !== null && typeof r === 'object' &&
+        typeof r.year === 'number' && r.year > 1800 && r.year < 2200 &&
+        typeof r.month === 'number' && r.month >= 1 && r.month <= 12 &&
+        (typeof r.cape === 'number' || r.cape === null) &&
+        (typeof r.long_interest_rate === 'number' || r.long_interest_rate === null)
+      );
+      if (validated.length === 0) throw new Error('Shiller data: no valid records after validation');
+      return validated;
+    }
+
+    function buildChartOptions(yLabel, yFormatter, xMin, xMax) {
+      return {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: '#0A0C14',
+            titleColor: '#E4DED3',
+            bodyColor: '#5A5870',
+            borderColor: '#222638',
+            borderWidth: 1,
+            padding: 14,
+            titleFont: { family: "'JetBrains Mono', monospace", size: 11 },
+            bodyFont: { family: "'JetBrains Mono', monospace", size: 11 },
+            callbacks: {
+              title(items) {
+                if (!items.length) return '';
+                return new Date(items[0].parsed.x).toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+              },
+              label(item) {
+                return ` ${item.dataset.label}: ${yFormatter(item.parsed.y)}`;
+              },
+            },
+          },
+          zoom: {
+            limits: { x: { min: xMin, max: xMax } },
+            pan: { enabled: true, mode: 'x' },
+            zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' },
+          },
+        },
+        scales: {
+          x: {
+            type: 'time',
+            time: { unit: 'year', displayFormats: { year: 'yyyy' } },
+            grid: { color: '#0C0E16' },
+            ticks: { color: '#2E2C38', maxTicksLimit: 15, font: { family: "'JetBrains Mono', monospace", size: 11 } },
+            border: { color: '#14172200' },
+          },
+          y: {
+            grid: { color: '#0C0E16' },
+            ticks: { color: '#2E2C38', callback: yFormatter, font: { family: "'JetBrains Mono', monospace", size: 11 } },
+            title: { display: true, text: yLabel, color: '#2E2C38', font: { family: "'JetBrains Mono', monospace", size: 11 } },
+            border: { color: '#14172200' },
+          },
+        },
+      };
+    }
+
+    function buildLegend(legendEl, chart, colorMap) {
+      chart.data.datasets.forEach((ds, i) => {
+        const info = colorMap[ds.label] || { color: ds.borderColor, dashed: !!ds.borderDash };
+        const item = document.createElement('div');
+        item.className = 'legend-item';
+        const swatch = document.createElement('span');
+        swatch.className = 'legend-swatch' + (info.dashed ? ' dashed' : '');
+        swatch.style.setProperty('--color', info.color);
+        if (!info.dashed) swatch.style.background = info.color;
+        item.appendChild(swatch);
+        item.appendChild(document.createTextNode(ds.label));
+        item.addEventListener('click', () => {
+          const meta = chart.getDatasetMeta(i);
+          meta.hidden = !meta.hidden;
+          item.style.opacity = meta.hidden ? 0.4 : 1;
+          chart.update();
+        });
+        legendEl.appendChild(item);
+      });
+    }
+
+    function bindRangeButtons(attr, chart, lastDate) {
+      document.querySelectorAll(`[${attr}]`).forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll(`[${attr}]`).forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          const range = btn.getAttribute(attr);
+          if (range === 'all') {
+            chart.resetZoom();
+          } else {
+            const years = parseInt(range);
+            const start = lastDate.getTime() - years * MS_PER_YEAR;
+            chart.zoomScale('x', { min: start, max: lastDate.getTime() + 30 * MS_PER_DAY });
+          }
+        });
+      });
+    }
+
+    function renderCapeChart(history) {
+      const records = history.filter(r => r.cape > 0 && r.year && r.month);
+      if (!records.length) {
+        document.getElementById('cape-loading').innerHTML = '<div class="error">No CAPE data available.</div>';
+        return;
+      }
+      const capeData = records.map(r => ({ x: new Date(r.year, r.month - 1, 1), y: r.cape }));
+      const vals = capeData.map(d => d.y);
+      const mean = vals.reduce((s, v) => s + v, 0) / vals.length;
+      const std = Math.sqrt(vals.reduce((s, v) => s + (v - mean) ** 2, 0) / vals.length);
+
+      const latest = capeData[capeData.length - 1];
+      const devPct = ((latest.y - mean) / mean) * 100;
+      const capeEl = document.getElementById('cape-current');
+      capeEl.textContent = latest.y.toFixed(1) + 'x';
+      capeEl.className = 'stat-value ' + (latest.y > mean + std ? 'overvalued' : latest.y < mean - std ? 'undervalued' : 'fair');
+      document.getElementById('cape-current-sub').textContent =
+        latest.x.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+      document.getElementById('cape-avg').textContent = mean.toFixed(1) + 'x';
+      const devEl = document.getElementById('cape-deviation');
+      devEl.textContent = (devPct >= 0 ? '+' : '') + devPct.toFixed(0) + '%';
+      devEl.className = 'stat-value ' + (devPct > 30 ? 'overvalued' : devPct < -30 ? 'undervalued' : 'fair');
+      document.getElementById('cape-deviation-label').textContent =
+        devPct > 80 ? 'Significantly overvalued' :
+        devPct > 30 ? 'Overvalued' :
+        devPct > -20 ? 'Near fair value' : 'Undervalued';
+
+      const start = capeData[0].x;
+      const end = new Date(latest.x.getTime() + 2 * MS_PER_YEAR);
+      const hLine = y => [{ x: start, y }, { x: end, y }];
+      const meanLabel = `Historical Mean (${mean.toFixed(1)}x)`;
+      const p1Label = `+1 SD (${(mean + std).toFixed(1)}x)`;
+      const p2Label = `+2 SD (${(mean + 2 * std).toFixed(1)}x)`;
+
+      document.getElementById('cape-loading').style.display = 'none';
+      const canvas = document.getElementById('cape-chart');
+      canvas.style.display = 'block';
+
+      const chart = new Chart(canvas.getContext('2d'), {
+        type: 'line',
+        data: {
+          datasets: [
+            { label: 'Shiller CAPE', data: capeData, borderColor: '#a78bfa', backgroundColor: 'rgba(167,139,250,0.06)', borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 5, pointHoverBackgroundColor: '#a78bfa', fill: false, tension: 0.1, order: 0 },
+            { label: meanLabel, data: hLine(mean), borderColor: '#888', borderWidth: 1.5, borderDash: [8, 4], pointRadius: 0, fill: false, order: 1 },
+            { label: p1Label, data: hLine(mean + std), borderColor: '#f59e0b', borderWidth: 1, borderDash: [6, 4], pointRadius: 0, fill: false, order: 2 },
+            { label: p2Label, data: hLine(mean + 2 * std), borderColor: '#ef4444', borderWidth: 1, borderDash: [6, 4], pointRadius: 0, fill: false, order: 3 },
+          ],
+        },
+        options: buildChartOptions('CAPE Ratio', v => v.toFixed(1) + 'x', capeData[0].x.getTime(), end.getTime()),
+      });
+      canvas.parentElement.style.height = '400px';
+      canvas.style.height = '400px';
+      chart.resize();
+
+      buildLegend(document.getElementById('cape-legend'), chart, {
+        'Shiller CAPE': { color: '#a78bfa', dashed: false },
+        [meanLabel]: { color: '#888', dashed: true },
+        [p1Label]: { color: '#f59e0b', dashed: true },
+        [p2Label]: { color: '#ef4444', dashed: true },
+      });
+      bindRangeButtons('data-cape-range', chart, latest.x);
+      document.getElementById('cape-reset-zoom').addEventListener('click', () => {
+        chart.resetZoom();
+        document.querySelectorAll('[data-cape-range]').forEach(b => b.classList.remove('active'));
+        document.querySelector('[data-cape-range="all"]').classList.add('active');
+      });
+    }
+
+    function renderFedModelChart(history) {
+      const records = history.filter(r => r.cape > 0 && r.long_interest_rate > 0 && r.year && r.month);
+      if (!records.length) {
+        document.getElementById('fedm-loading').innerHTML = '<div class="error">No Fed Model data available.</div>';
+        return;
+      }
+      const dates = records.map(r => new Date(r.year, r.month - 1, 1));
+      const eyData = records.map((r, i) => ({ x: dates[i], y: 100 / r.cape }));
+      const byData = records.map((r, i) => ({ x: dates[i], y: r.long_interest_rate }));
+      const spreadData = records.map((r, i) => ({ x: dates[i], y: (100 / r.cape) - r.long_interest_rate }));
+
+      const last = records[records.length - 1];
+      const lastDate = dates[dates.length - 1];
+      const ey = 100 / last.cape;
+      const by = last.long_interest_rate;
+      const spread = ey - by;
+
+      document.getElementById('fedm-earnings-yield').textContent = ey.toFixed(2) + '%';
+      document.getElementById('fedm-bond-yield').textContent = by.toFixed(2) + '%';
+      document.getElementById('fedm-bond-sub').textContent = lastDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+      const spreadEl = document.getElementById('fedm-spread');
+      spreadEl.textContent = (spread >= 0 ? '+' : '') + spread.toFixed(2) + '%';
+      spreadEl.className = 'stat-value ' + (spread < -1 ? 'overvalued' : spread > 1 ? 'undervalued' : 'fair');
+      document.getElementById('fedm-spread-label').textContent =
+        spread < -3 ? 'Bonds significantly favored' :
+        spread < -1 ? 'Bonds marginally favored' :
+        spread < 1  ? 'Near parity' :
+        spread < 3  ? 'Stocks modestly favored' : 'Stocks significantly favored';
+
+      document.getElementById('fedm-loading').style.display = 'none';
+      const canvas = document.getElementById('fedm-chart');
+      canvas.style.display = 'block';
+
+      const chart = new Chart(canvas.getContext('2d'), {
+        type: 'line',
+        data: {
+          datasets: [
+            { label: 'Earnings Yield (1/CAPE)', data: eyData, borderColor: '#22c55e', borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 5, fill: false, tension: 0.1, order: 0 },
+            { label: '10Y Interest Rate', data: byData, borderColor: '#f59e0b', borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 5, fill: false, tension: 0.1, order: 1 },
+            { label: 'Spread (EY − 10Y)', data: spreadData, borderColor: '#3b82f6', borderWidth: 1, borderDash: [5, 4], pointRadius: 0, fill: false, tension: 0.1, order: 2 },
+          ],
+        },
+        options: buildChartOptions('Yield (%)', v => v.toFixed(1) + '%', dates[0].getTime(), lastDate.getTime()),
+      });
+      canvas.parentElement.style.height = '400px';
+      canvas.style.height = '400px';
+      chart.resize();
+
+      buildLegend(document.getElementById('fedm-legend'), chart, {
+        'Earnings Yield (1/CAPE)': { color: '#22c55e', dashed: false },
+        '10Y Interest Rate': { color: '#f59e0b', dashed: false },
+        'Spread (EY − 10Y)': { color: '#3b82f6', dashed: true },
+      });
+      bindRangeButtons('data-fedm-range', chart, lastDate);
+      document.getElementById('fedm-reset-zoom').addEventListener('click', () => {
+        chart.resetZoom();
+        document.querySelectorAll('[data-fedm-range]').forEach(b => b.classList.remove('active'));
+        document.querySelector('[data-fedm-range="all"]').classList.add('active');
+      });
+    }
+
+    function renderCorpProfitsChart(cpData, gdpData) {
+      const gdpMap = new Map();
+      for (const d of gdpData) {
+        const key = toQuarterKey(d.date);
+        gdpMap.set(key, d.value);
+      }
+
+      const seriesData = [];
+      for (const d of cpData) {
+        const key = toQuarterKey(d.date);
+        const gdpVal = gdpMap.get(key);
+        if (gdpVal && gdpVal > 0) {
+          seriesData.push({ x: d.date, y: (d.value / gdpVal) * 100 });
+        }
+      }
+
+      if (!seriesData.length) {
+        document.getElementById('cp-loading').innerHTML = '<div class="error">No data available.</div>';
+        return;
+      }
+
+      const vals = seriesData.map(d => d.y);
+      const mean = vals.reduce((s, v) => s + v, 0) / vals.length;
+      const std = Math.sqrt(vals.reduce((s, v) => s + (v - mean) ** 2, 0) / vals.length);
+      const latest = seriesData[seriesData.length - 1];
+      const devPct = ((latest.y - mean) / mean) * 100;
+
+      const cpEl = document.getElementById('cp-current');
+      cpEl.textContent = latest.y.toFixed(1) + '%';
+      cpEl.className = 'stat-value ' + (latest.y > mean + std ? 'overvalued' : latest.y < mean - std ? 'undervalued' : 'fair');
+      document.getElementById('cp-current-sub').textContent =
+        latest.x.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+      document.getElementById('cp-avg').textContent = mean.toFixed(1) + '%';
+      const devEl = document.getElementById('cp-deviation');
+      devEl.textContent = (devPct >= 0 ? '+' : '') + devPct.toFixed(0) + '%';
+      devEl.className = 'stat-value ' + (devPct > 30 ? 'overvalued' : devPct < -30 ? 'undervalued' : 'fair');
+      document.getElementById('cp-deviation-label').textContent =
+        devPct > 60 ? 'Significantly elevated' :
+        devPct > 20 ? 'Above historical average' :
+        devPct > -20 ? 'Near historical average' : 'Below historical average';
+
+      const domStart = seriesData[0].x;
+      const domEnd = new Date(latest.x.getTime() + 2 * MS_PER_YEAR);
+      const hLine = y => [{ x: domStart, y }, { x: domEnd, y }];
+      const meanLabel = `Historical Mean (${mean.toFixed(1)}%)`;
+      const p1Label = `+1 SD (${(mean + std).toFixed(1)}%)`;
+      const m1Label = `-1 SD (${(mean - std).toFixed(1)}%)`;
+
+      document.getElementById('cp-loading').style.display = 'none';
+      const canvas = document.getElementById('cp-chart');
+      canvas.style.display = 'block';
+
+      const chart = new Chart(canvas.getContext('2d'), {
+        type: 'line',
+        data: {
+          datasets: [
+            { label: 'Corp. Profits / GDP', data: seriesData, borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,0.06)', borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 5, pointHoverBackgroundColor: '#38bdf8', fill: false, tension: 0.1, order: 0 },
+            { label: meanLabel, data: hLine(mean), borderColor: '#888', borderWidth: 1.5, borderDash: [8, 4], pointRadius: 0, fill: false, order: 1 },
+            { label: p1Label, data: hLine(mean + std), borderColor: '#f59e0b', borderWidth: 1, borderDash: [6, 4], pointRadius: 0, fill: false, order: 2 },
+            { label: m1Label, data: hLine(mean - std), borderColor: '#22c55e', borderWidth: 1, borderDash: [6, 4], pointRadius: 0, fill: false, order: 3 },
+          ],
+        },
+        options: buildChartOptions('Corp. Profits / GDP (%)', v => v.toFixed(1) + '%', domStart.getTime(), domEnd.getTime()),
+      });
+      canvas.parentElement.style.height = '400px';
+      canvas.style.height = '400px';
+      chart.resize();
+
+      buildLegend(document.getElementById('cp-legend'), chart, {
+        'Corp. Profits / GDP': { color: '#38bdf8', dashed: false },
+        [meanLabel]: { color: '#888', dashed: true },
+        [p1Label]: { color: '#f59e0b', dashed: true },
+        [m1Label]: { color: '#22c55e', dashed: true },
+      });
+      bindRangeButtons('data-cp-range', chart, latest.x);
+      document.getElementById('cp-reset-zoom').addEventListener('click', () => {
+        chart.resetZoom();
+        document.querySelectorAll('[data-cp-range]').forEach(b => b.classList.remove('active'));
+        document.querySelector('[data-cp-range="all"]').classList.add('active');
+      });
+    }
+
+    async function fetchGauges(prefetchedGdpData) {
+      const fetchGdp = prefetchedGdpData
+        ? Promise.resolve(prefetchedGdpData)
+        : fetchFredSeries('GDP', '1947-01-01');
+
+      const [shillerResult, cpResult, gdpResult] = await Promise.allSettled([
+        fetchShillerHistory(),
+        fetchFredSeries('CP', '1947-01-01'),
+        fetchGdp,
+      ]);
+
+      if (shillerResult.status === 'fulfilled' && shillerResult.value.length > 0) {
+        renderCapeChart(shillerResult.value);
+        renderFedModelChart(shillerResult.value);
+      } else {
+        const msg = '<div class="error">Could not load Shiller data.</div>';
+        document.getElementById('cape-loading').innerHTML = msg;
+        document.getElementById('fedm-loading').innerHTML = msg;
+      }
+
+      const cpData = cpResult.status === 'fulfilled' ? cpResult.value : [];
+      const gdpData = gdpResult.status === 'fulfilled' ? gdpResult.value : [];
+      if (cpData.length > 0 && gdpData.length > 0) {
+        renderCorpProfitsChart(cpData, gdpData);
+      } else {
+        document.getElementById('cp-loading').innerHTML = '<div class="error">Could not load FRED data.</div>';
+      }
+    }
+
+    // Fetch GDP once and share it across main() and fetchGauges() to avoid duplicate requests.
+    fetchFredSeries('GDP', '1945-01-01').then((gdpData) => {
+      main(gdpData);
+      fetchGauges(gdpData);
+    }).catch(() => {
+      // GDP fetch failed — let each function fall back independently.
+      main(null);
+      fetchGauges(null);
+    });
+  </script>
+</body>
+</html>

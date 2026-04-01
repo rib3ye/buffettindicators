@@ -1,0 +1,6 @@
+.env
+.env.local
+*.pem
+.claude/
+.cursor/
+node_modules/

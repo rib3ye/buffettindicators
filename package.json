@@ -1,0 +1,9 @@
+{
+  "name": "buffettindex",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Lightweight local web server for BuffettIndex",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
