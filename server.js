@@ -452,11 +452,11 @@ const requestHandler = (req, res) => {
     "Permissions-Policy": "geolocation=(), camera=(), microphone=()",
     "Content-Security-Policy": [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+      "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://static.cloudflareinsights.com",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src https://fonts.gstatic.com",
       "img-src 'self' data:",
-      "connect-src 'self' https://cdn.jsdelivr.net",
+      "connect-src 'self' https://cdn.jsdelivr.net https://cloudflareinsights.com",
     ].join("; "),
     "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
   };
