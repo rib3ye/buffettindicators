@@ -97,6 +97,7 @@ function getTtlForSeries(seriesId) {
 const CACHE_MAX_ENTRIES = 200;
 
 const CACHE_DIR = process.env.CACHE_DIR || __dirname;
+fs.mkdirSync(CACHE_DIR, { recursive: true });
 const db = new Database(path.join(CACHE_DIR, "cache.db"));
 
 db.exec(`
