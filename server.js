@@ -85,8 +85,14 @@ function getTtlForSeries(seriesId) {
 // preserves insertion order, so .keys().next().value is always the oldest).
 //
 // Each entry shape: { body: Buffer, statusCode: number, storedAt: number, ttlMs: number }
+//
+// The cache is also written to disk on shutdown and reloaded on startup so that
+// a process restart (crash, scale-to-zero) doesn't force a cold fetch of every
+// series. Note: Railway replaces the container on deploy, so disk persistence
+// only helps with restarts within the same deployment, not across deploys.
 
 const CACHE_MAX_ENTRIES = 200;
+const CACHE_FILE = path.join(__dirname, ".cache.json");
 const cache = new Map();
 
 function buildCacheKey(seriesId, observationStart, frequency) {
@@ -96,13 +102,8 @@ function buildCacheKey(seriesId, observationStart, frequency) {
 function getFromCache(key) {
   const entry = cache.get(key);
   if (!entry) return null;
-
-  const isExpired = Date.now() - entry.storedAt > entry.ttlMs;
-  if (isExpired) {
-    cache.delete(key);
-    return null;
-  }
-  return entry;
+  const isStale = Date.now() - entry.storedAt > entry.ttlMs;
+  return { ...entry, isStale };
 }
 
 function storeInCache(key, body, statusCode, ttlMs) {
@@ -111,6 +112,37 @@ function storeInCache(key, body, statusCode, ttlMs) {
     cache.delete(oldestKey);
   }
   cache.set(key, { body, statusCode, storedAt: Date.now(), ttlMs });
+}
+
+// Serialize the cache to disk. Buffer bodies are stored as base64 strings.
+// Called synchronously from the shutdown handler so nothing is lost on exit.
+function saveCacheToDisk() {
+  try {
+    const entries = [...cache.entries()].map(([key, entry]) => [
+      key,
+      { ...entry, body: entry.body.toString("base64") },
+    ]);
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(entries));
+    console.log(`Cache saved: ${entries.length} entries written to ${CACHE_FILE}`);
+  } catch (err) {
+    console.error("Failed to save cache to disk:", err);
+  }
+}
+
+// Deserialize the cache from disk on startup. Skips entries with non-200
+// status codes so we never resurrect a cached error response.
+function loadCacheFromDisk() {
+  try {
+    const entries = JSON.parse(fs.readFileSync(CACHE_FILE, "utf8"));
+    for (const [key, entry] of entries) {
+      if (entry.statusCode === 200) {
+        cache.set(key, { ...entry, body: Buffer.from(entry.body, "base64") });
+      }
+    }
+    console.log(`Cache loaded: ${cache.size} entries restored from ${CACHE_FILE}`);
+  } catch {
+    // No cache file yet — start fresh.
+  }
 }
 
 // ── In-flight request coalescing ──────────────────────────────────────────────
@@ -304,17 +336,27 @@ function handleFredRequest(req, res, parsedUrl, securityHeaders) {
   const cacheKey = buildCacheKey(seriesId, observationStart, frequency);
 
   const cached = getFromCache(cacheKey);
-  if (cached) {
+  if (cached && !cached.isStale) {
     sendJsonResponse(res, cached.statusCode, cached.body, securityHeaders);
     return;
   }
+
+  // On upstream failure, serve the stale entry (if one exists with a good status)
+  // so users never see a broken page just because FRED is temporarily down.
+  const serveStaleOnFailure = (err) => {
+    if (cached && cached.statusCode === 200) {
+      sendJsonResponse(res, cached.statusCode, cached.body, securityHeaders);
+    } else {
+      sendUpstreamErrorResponse(res, err, securityHeaders);
+    }
+  };
 
   // If an identical request is already in-flight, attach to its Promise instead
   // of making a second upstream call.
   if (inFlightRequests.has(cacheKey)) {
     inFlightRequests.get(cacheKey)
       .then(({ body, statusCode }) => sendJsonResponse(res, statusCode, body, securityHeaders))
-      .catch((err) => sendUpstreamErrorResponse(res, err, securityHeaders));
+      .catch(serveStaleOnFailure);
     return;
   }
 
@@ -334,7 +376,7 @@ function handleFredRequest(req, res, parsedUrl, securityHeaders) {
 
   fetchUpstream(fredUrl, cacheKey, getTtlForSeries(seriesId))
     .then(({ body, statusCode }) => sendJsonResponse(res, statusCode, body, securityHeaders))
-    .catch((err) => sendUpstreamErrorResponse(res, err, securityHeaders));
+    .catch(serveStaleOnFailure);
 }
 
 const SHILLER_DATA_URL   = "https://posix4e.github.io/shiller_wrapper_data/data/stock_market_data.json";
@@ -348,21 +390,29 @@ function handleShillerRequest(req, res, securityHeaders) {
   }
 
   const cached = getFromCache(SHILLER_CACHE_KEY);
-  if (cached) {
+  if (cached && !cached.isStale) {
     sendJsonResponse(res, cached.statusCode, cached.body, securityHeaders);
     return;
   }
 
+  const serveStaleOnFailure = (err) => {
+    if (cached && cached.statusCode === 200) {
+      sendJsonResponse(res, cached.statusCode, cached.body, securityHeaders);
+    } else {
+      sendUpstreamErrorResponse(res, err, securityHeaders);
+    }
+  };
+
   if (inFlightRequests.has(SHILLER_CACHE_KEY)) {
     inFlightRequests.get(SHILLER_CACHE_KEY)
       .then(({ body, statusCode }) => sendJsonResponse(res, statusCode, body, securityHeaders))
-      .catch((err) => sendUpstreamErrorResponse(res, err, securityHeaders));
+      .catch(serveStaleOnFailure);
     return;
   }
 
   fetchUpstream(SHILLER_DATA_URL, SHILLER_CACHE_KEY, ONE_DAY_MS)
     .then(({ body, statusCode }) => sendJsonResponse(res, statusCode, body, securityHeaders))
-    .catch((err) => sendUpstreamErrorResponse(res, err, securityHeaders));
+    .catch(serveStaleOnFailure);
 }
 
 function handleStaticFileRequest(req, res, securityHeaders) {
@@ -464,11 +514,22 @@ const requestHandler = (req, res) => {
   handleStaticFileRequest(req, res, securityHeaders);
 };
 
+loadCacheFromDisk();
+
 const server = tlsOptions
   ? https.createServer(tlsOptions, requestHandler)
   : http.createServer(requestHandler);
 
 server.on("error", (err) => { console.error("Server error:", err); });
+
+// Save cache on shutdown. Railway sends SIGTERM before killing the process;
+// SIGINT handles Ctrl-C in local development.
+function shutdown() {
+  saveCacheToDisk();
+  server.close(() => process.exit(0));
+}
+process.on("SIGTERM", shutdown);
+process.on("SIGINT",  shutdown);
 
 const protocol = tlsOptions ? "https" : "http";
 server.listen(port, () => {
