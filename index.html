@@ -346,56 +346,68 @@
     </div>
 
   <script>
-    const FRED_API_BASE = '/api/fred';
-    const MS_PER_YEAR = 365.25 * 24 * 3600 * 1000;
-    const MS_PER_DAY = 24 * 3600 * 1000;
+    // ── Constants ──────────────────────────────────────────────────────────────
 
+    const FRED_API_BASE  = '/api/fred';
+    const MS_PER_YEAR    = 365.25 * 24 * 3600 * 1000;
+    const MS_PER_DAY     = 24 * 3600 * 1000;
+
+    // Maps human-readable frequency names to FRED API frequency codes.
+    const FREQUENCY_CODE_MAP = {
+      'Quarterly': 'q',
+      'Daily':     'd',
+      'Annual':    'a',
+      'Monthly':   'm',
+    };
+
+    // ── Data fetching ──────────────────────────────────────────────────────────
+
+    async function fetchFredSeries(seriesId, startDate = '1970-01-01', frequency = 'Quarterly') {
+      const frequencyCode = FREQUENCY_CODE_MAP[frequency] || 'q';
+      const url = `${FRED_API_BASE}?series_id=${seriesId}&observation_start=${startDate}&frequency=${frequencyCode}`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`Failed to fetch ${seriesId}: ${response.status}`);
+      const jsonData = await response.json();
+
+      const dataPoints = [];
+      for (const observation of jsonData.observations || []) {
+        const parsedValue = parseFloat(observation.value);
+        if (!isNaN(parsedValue) && observation.value !== '.') {
+          dataPoints.push({ date: new Date(observation.date), value: parsedValue });
+        }
+      }
+      return dataPoints;
+    }
+
+    async function fetchShillerHistory() {
+      const response = await fetch('/api/shiller');
+      if (!response.ok) throw new Error('Shiller history fetch failed: ' + response.status);
+      const jsonData = await response.json();
+      if (!jsonData || !Array.isArray(jsonData.data)) throw new Error('Shiller data: unexpected format');
+
+      const validRecords = jsonData.data.filter(record =>
+        record !== null && typeof record === 'object' &&
+        typeof record.year === 'number' && record.year > 1800 && record.year < 2200 &&
+        typeof record.month === 'number' && record.month >= 1 && record.month <= 12 &&
+        (typeof record.cape === 'number' || record.cape === null) &&
+        (typeof record.long_interest_rate === 'number' || record.long_interest_rate === null)
+      );
+      if (validRecords.length === 0) throw new Error('Shiller data: no valid records after validation');
+      return validRecords;
+    }
+
+    // ── Buffett Indicator — data processing ────────────────────────────────────
+
+    // Groups a date into its quarter so we can join market cap data with GDP data.
+    // E.g. 2024-05-01 → "2024-Q1" (month 4 is Q1 when using 0-indexed floor).
     function toQuarterKey(date) {
       return `${date.getFullYear()}-Q${Math.floor(date.getMonth() / 3)}`;
     }
 
-    async function fetchFredSeries(seriesId, startDate = '1970-01-01', frequency = 'Quarterly') {
-      const freqMap = { 'Quarterly': 'q', 'Daily': 'd', 'Annual': 'a', 'Monthly': 'm' };
-      const freq = freqMap[frequency] || 'q';
-      const url = `${FRED_API_BASE}?series_id=${seriesId}&observation_start=${startDate}&frequency=${freq}`;
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error(`Failed to fetch ${seriesId}: ${resp.status}`);
-      const json = await resp.json();
-      const data = [];
-      for (const obs of json.observations || []) {
-        const val = parseFloat(obs.value);
-        if (!isNaN(val) && obs.value !== '.') {
-          data.push({ date: new Date(obs.date), value: val });
-        }
-      }
-      return data;
-    }
-
-    function linearRegression(points) {
-      const n = points.length;
-      let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
-      for (const { x, y } of points) {
-        sumX += x;
-        sumY += y;
-        sumXY += x * y;
-        sumXX += x * x;
-      }
-      const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
-      const intercept = (sumY - slope * sumX) / n;
-      return { slope, intercept };
-    }
-
-    function exponentialRegression(points) {
-      // Fit log(y) = a + b*x  =>  y = exp(a) * exp(b*x)
-      const logPoints = points.filter(p => p.y > 0).map(p => ({ x: p.x, y: Math.log(p.y) }));
-      const { slope, intercept } = linearRegression(logPoints);
-      return { a: Math.exp(intercept), b: slope };
-    }
-
     async function fetchBuffettData(prefetchedGdpData) {
       try {
-        // NCBEILQ027S: Nonfinancial Corporate Business; Corporate Equities; Liability, Level (millions USD)
-        // GDP is in billions (SAAR). Market cap is in millions — divide by 1000 to get billions.
+        // NCBEILQ027S: Total US equity market cap in millions USD (Fed Z.1 Flow of Funds).
+        // GDP is in billions SAAR — convert market cap to billions by dividing by 1000.
         const fetchGdp = prefetchedGdpData
           ? Promise.resolve(prefetchedGdpData)
           : fetchFredSeries('GDP', '1945-01-01');
@@ -403,111 +415,249 @@
           fetchFredSeries('NCBEILQ027S', '1945-01-01'),
           fetchGdp,
         ]);
-        const gdpMap = new Map();
-        for (const d of gdpData) gdpMap.set(toQuarterKey(d.date), d.value);
+
+        const gdpByQuarter = new Map();
+        for (const dataPoint of gdpData) {
+          gdpByQuarter.set(toQuarterKey(dataPoint.date), dataPoint.value);
+        }
+
         const ratioData = [];
-        for (const w of marketCapData) {
-          const gdpVal = gdpMap.get(toQuarterKey(w.date));
-          if (gdpVal && gdpVal > 0) {
-            ratioData.push({ date: w.date, ratio: (w.value / 1000 / gdpVal) * 100 });
+        for (const dataPoint of marketCapData) {
+          const gdpValue = gdpByQuarter.get(toQuarterKey(dataPoint.date));
+          if (gdpValue && gdpValue > 0) {
+            ratioData.push({ date: dataPoint.date, ratio: (dataPoint.value / 1000 / gdpValue) * 100 });
           }
         }
         return { ratioData, usedFallbackSeries: false };
+
       } catch (_) {
-        const fallback = await fetchFredSeries('DDDM01USA156NWDB', '1975-01-01', 'Annual');
-        return { ratioData: fallback.map(d => ({ date: d.date, ratio: d.value })), usedFallbackSeries: true };
+        // Primary series unavailable — fall back to a pre-computed annual ratio series.
+        const fallbackData = await fetchFredSeries('DDDM01USA156NWDB', '1975-01-01', 'Annual');
+        return {
+          ratioData: fallbackData.map(dataPoint => ({ date: dataPoint.date, ratio: dataPoint.value })),
+          usedFallbackSeries: true,
+        };
       }
+    }
+
+    // Scales the most recent quarterly ratio up to today using daily S&P 500 data.
+    // This gives a more current reading between quarterly GDP releases.
+    async function fetchCurrentDailyEstimate(latestQuarterlyPoint) {
+      try {
+        const sp500Data = await fetchFredSeries('SP500', '1970-01-01', 'Daily');
+        const latestSp500 = sp500Data[sp500Data.length - 1];
+        const sp500AtLatestQuarter = [...sp500Data].reverse().find(d => d.date <= latestQuarterlyPoint.date);
+
+        if (latestSp500 && sp500AtLatestQuarter && sp500AtLatestQuarter.value > 0) {
+          const marketCapScaleFactor = latestSp500.value / sp500AtLatestQuarter.value;
+          return {
+            currentPoint: {
+              date: latestSp500.date,
+              ratio: latestQuarterlyPoint.ratio * marketCapScaleFactor,
+              estimated: true,
+            },
+            estimatedChartData: sp500Data
+              .filter(d => d.date >= latestQuarterlyPoint.date)
+              .map(d => ({
+                x: d.date,
+                y: latestQuarterlyPoint.ratio * (d.value / sp500AtLatestQuarter.value),
+              })),
+          };
+        }
+      } catch (_) {
+        // If daily S&P 500 data is unavailable, fall through to the quarterly latest point.
+      }
+      return {
+        currentPoint: { date: latestQuarterlyPoint.date, ratio: latestQuarterlyPoint.ratio, estimated: false },
+        estimatedChartData: [],
+      };
+    }
+
+    // ── Buffett Indicator — trend computation ──────────────────────────────────
+
+    function linearRegression(points) {
+      const n = points.length;
+      let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+      for (const { x, y } of points) {
+        sumX  += x;
+        sumY  += y;
+        sumXY += x * y;
+        sumXX += x * x;
+      }
+      const slope     = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
+      const intercept = (sumY - slope * sumX) / n;
+      return { slope, intercept };
+    }
+
+    // Fits an exponential curve y = a * exp(b*x) by linearizing via log(y) = ln(a) + b*x.
+    function exponentialRegression(points) {
+      const logPoints = points.filter(p => p.y > 0).map(p => ({ x: p.x, y: Math.log(p.y) }));
+      const { slope, intercept } = linearRegression(logPoints);
+      return { a: Math.exp(intercept), b: slope };
+    }
+
+    // Generates monthly points for the trend line and its ±1/±2 standard deviation bands,
+    // extending 2 years past the last data point so the bands project forward visibly.
+    // `a` and `b` are the exponential fit coefficients; day=0 corresponds to startDate.
+    function buildTrendBands(startDate, endDate, a, b, stdLogResid) {
+      const trendLine  = [];
+      const plus1SD    = [];
+      const plus2SD    = [];
+      const minus1SD   = [];
+      const minus2SD   = [];
+
+      const totalDays = (endDate.getTime() - startDate.getTime()) / MS_PER_DAY;
+
+      for (let day = 0; day <= totalDays; day += 30) {
+        const date          = new Date(startDate.getTime() + day * MS_PER_DAY);
+        const yearsFromT0   = (day * MS_PER_DAY) / MS_PER_YEAR;
+        const trendValue    = a * Math.exp(b * yearsFromT0);
+
+        trendLine.push({ x: date, y: trendValue });
+        plus1SD.push(  { x: date, y: trendValue * Math.exp(stdLogResid) });
+        plus2SD.push(  { x: date, y: trendValue * Math.exp(2 * stdLogResid) });
+        minus1SD.push( { x: date, y: trendValue * Math.exp(-stdLogResid) });
+        minus2SD.push( { x: date, y: trendValue * Math.exp(-2 * stdLogResid) });
+      }
+
+      return { trendLine, plus1SD, plus2SD, minus1SD, minus2SD };
     }
 
     function computeBuffettTrend(ratioData) {
       const t0 = ratioData[0].date.getTime();
-      const points = ratioData.map(d => ({ x: (d.date.getTime() - t0) / MS_PER_YEAR, y: d.ratio }));
+      const points = ratioData.map(d => ({
+        x: (d.date.getTime() - t0) / MS_PER_YEAR,
+        y: d.ratio,
+      }));
+
       const { a, b } = exponentialRegression(points);
-      const logResiduals = points.map(p => Math.log(p.y) - (Math.log(a) + b * p.x));
-      const meanLogResid = logResiduals.reduce((s, r) => s + r, 0) / logResiduals.length;
-      const stdLogResid = Math.sqrt(
-        logResiduals.reduce((s, r) => s + (r - meanLogResid) ** 2, 0) / logResiduals.length
+
+      // Log residuals tell us how much each data point deviates from the trend on
+      // a multiplicative scale — this is the right space for an exponential trend.
+      const logResiduals  = points.map(p => Math.log(p.y) - (Math.log(a) + b * p.x));
+      const meanLogResid  = logResiduals.reduce((sum, r) => sum + r, 0) / logResiduals.length;
+      const stdLogResid   = Math.sqrt(
+        logResiduals.reduce((sum, r) => sum + (r - meanLogResid) ** 2, 0) / logResiduals.length
       );
-      const lastDate = ratioData[ratioData.length - 1].date;
+
       const startDate = ratioData[0].date;
-      const endTime = new Date(lastDate.getTime() + 2 * MS_PER_YEAR);
-      const totalDays = (endTime.getTime() - startDate.getTime()) / MS_PER_DAY;
-      const trendData = [], plus1SD = [], plus2SD = [], minus1SD = [], minus2SD = [];
-      for (let d = 0; d <= totalDays; d += 30) {
-        const date = new Date(startDate.getTime() + d * MS_PER_DAY);
-        const x = (d * MS_PER_DAY) / MS_PER_YEAR;
-        const trendVal = a * Math.exp(b * x);
-        trendData.push({ x: date, y: trendVal });
-        plus1SD.push({ x: date, y: trendVal * Math.exp(stdLogResid) });
-        plus2SD.push({ x: date, y: trendVal * Math.exp(2 * stdLogResid) });
-        minus1SD.push({ x: date, y: trendVal * Math.exp(-stdLogResid) });
-        minus2SD.push({ x: date, y: trendVal * Math.exp(-2 * stdLogResid) });
-      }
-      const trendByTimestamp = new Map(trendData.map(p => [p.x.getTime(), p.y]));
-      return { t0, a, b, stdLogResid, trendData, plus1SD, plus2SD, minus1SD, minus2SD, trendByTimestamp, startDate, endTime, lastDate };
+      const lastDate  = ratioData[ratioData.length - 1].date;
+      const endTime   = new Date(lastDate.getTime() + 2 * MS_PER_YEAR);
+
+      const { trendLine, plus1SD, plus2SD, minus1SD, minus2SD } =
+        buildTrendBands(startDate, endTime, a, b, stdLogResid);
+
+      // Build a timestamp → trend value lookup so tooltip callbacks can annotate band values.
+      const trendByTimestamp = new Map(trendLine.map(p => [p.x.getTime(), p.y]));
+
+      return {
+        t0, a, b, stdLogResid,
+        trendData: trendLine, plus1SD, plus2SD, minus1SD, minus2SD,
+        trendByTimestamp,
+        startDate, endTime, lastDate,
+      };
     }
 
-    async function fetchCurrentEstimate(latest) {
-      try {
-        const sp500Data = await fetchFredSeries('SP500', '1970-01-01', 'Daily');
-        const latestSp500 = sp500Data[sp500Data.length - 1];
-        const sp500AtLatestQuarter = [...sp500Data].reverse().find(d => d.date <= latest.date);
-        if (latestSp500 && sp500AtLatestQuarter && sp500AtLatestQuarter.value > 0) {
-          const scale = latestSp500.value / sp500AtLatestQuarter.value;
-          return {
-            currentPoint: { date: latestSp500.date, ratio: latest.ratio * scale, estimated: true },
-            estimatedChartData: sp500Data
-              .filter(d => d.date >= latest.date)
-              .map(d => ({ x: d.date, y: latest.ratio * (d.value / sp500AtLatestQuarter.value) })),
-          };
-        }
-      } catch (_) {
-        // If daily series is unavailable, fall through to quarterly latest point.
-      }
-      return { currentPoint: { date: latest.date, ratio: latest.ratio, estimated: false }, estimatedChartData: [] };
+    // ── Buffett Indicator — rendering ──────────────────────────────────────────
+
+    function classifyVsStdDev(value, reference, stdDev) {
+      if (value > reference * Math.exp(stdDev))  return 'overvalued';
+      if (value < reference * Math.exp(-stdDev)) return 'undervalued';
+      return 'fair';
+    }
+
+    function classifyDeviationPct(deviationPct, highThreshold, lowThreshold) {
+      if (deviationPct > highThreshold)  return 'overvalued';
+      if (deviationPct < -lowThreshold)  return 'undervalued';
+      return 'fair';
+    }
+
+    function describeBuffettDeviation(deviationPct) {
+      if (deviationPct > 50)  return 'Significantly overvalued';
+      if (deviationPct > 20)  return 'Overvalued';
+      if (deviationPct > -20) return 'Fair value range';
+      if (deviationPct > -50) return 'Undervalued';
+      return 'Significantly undervalued';
     }
 
     function renderBuffettStats({ currentPoint, latestTrend, stdLogResid, meanRatio }) {
-      document.getElementById('current-ratio').textContent = currentPoint.ratio.toFixed(0) + '%';
-      document.getElementById('current-ratio').className =
-        'stat-value ' + (currentPoint.ratio > latestTrend * Math.exp(stdLogResid) ? 'overvalued' :
-          currentPoint.ratio < latestTrend * Math.exp(-stdLogResid) ? 'undervalued' : 'fair');
+      const deviationPct = (currentPoint.ratio - latestTrend) / latestTrend * 100;
+
+      const ratioElement = document.getElementById('current-ratio');
+      ratioElement.textContent = currentPoint.ratio.toFixed(0) + '%';
+      ratioElement.className   = 'stat-value ' + classifyVsStdDev(currentPoint.ratio, latestTrend, stdLogResid);
+
       document.getElementById('current-date').textContent =
         currentPoint.date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) +
         (currentPoint.estimated ? ' (daily estimate)' : '');
+
       document.getElementById('trend-value').textContent = latestTrend.toFixed(0) + '%';
-      const deviationPct = (currentPoint.ratio - latestTrend) / latestTrend * 100;
-      document.getElementById('deviation-value').textContent =
-        (deviationPct >= 0 ? '+' : '') + deviationPct.toFixed(0) + '%';
-      document.getElementById('deviation-value').className =
-        'stat-value ' + (deviationPct > 30 ? 'overvalued' : deviationPct < -30 ? 'undervalued' : 'fair');
-      document.getElementById('deviation-label').textContent =
-        deviationPct > 50 ? 'Significantly overvalued' :
-        deviationPct > 20 ? 'Overvalued' :
-        deviationPct > -20 ? 'Fair value range' :
-        deviationPct > -50 ? 'Undervalued' : 'Significantly undervalued';
+
+      const deviationElement = document.getElementById('deviation-value');
+      deviationElement.textContent = (deviationPct >= 0 ? '+' : '') + deviationPct.toFixed(0) + '%';
+      deviationElement.className   = 'stat-value ' + classifyDeviationPct(deviationPct, 30, 30);
+
+      document.getElementById('deviation-label').textContent = describeBuffettDeviation(deviationPct);
       document.getElementById('mean-value').textContent = meanRatio.toFixed(0) + '%';
     }
 
     function renderBuffettChart({ ratioData, trendData, plus1SD, plus2SD, minus1SD, minus2SD, estimatedChartData, trendByTimestamp, startDate, endTime, lastDate }) {
-      const loadingEl = document.getElementById('loading');
-      const canvasEl = document.getElementById('buffett-chart');
-      loadingEl.style.display = 'none';
-      canvasEl.style.display = 'block';
+      const loadingElement = document.getElementById('loading');
+      const canvasElement  = document.getElementById('buffett-chart');
+      loadingElement.style.display = 'none';
+      canvasElement.style.display  = 'block';
 
-      const chart = new Chart(canvasEl.getContext('2d'), {
-        type: 'line',
-        data: {
-          datasets: [
-            { label: 'Buffett Indicator', data: ratioData.map(d => ({ x: d.date, y: d.ratio })), borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.08)', borderWidth: 2, pointRadius: 0, pointHoverRadius: 5, pointHoverBackgroundColor: '#3b82f6', fill: false, tension: 0.1, order: 0 },
-            { label: 'Estimated (S&P 500)', data: estimatedChartData, borderColor: '#3b82f6', borderWidth: 2, borderDash: [5, 4], pointRadius: 0, pointHoverRadius: 5, pointHoverBackgroundColor: '#3b82f6', fill: false, tension: 0.1, order: 0 },
-            { label: 'Historical Trend', data: trendData, borderColor: '#888', borderWidth: 1.5, borderDash: [8, 4], pointRadius: 0, pointHoverRadius: 0, fill: false, order: 1 },
-            { label: '+1 Std Dev', data: plus1SD, borderColor: '#f59e0b', borderWidth: 1.2, borderDash: [6, 4], pointRadius: 0, pointHoverRadius: 0, fill: false, order: 2 },
-            { label: '+2 Std Dev', data: plus2SD, borderColor: '#ef4444', borderWidth: 1.2, borderDash: [6, 4], pointRadius: 0, pointHoverRadius: 0, fill: false, order: 3 },
-            { label: '-1 Std Dev', data: minus1SD, borderColor: '#22c55e', borderWidth: 1.2, borderDash: [6, 4], pointRadius: 0, pointHoverRadius: 0, fill: false, order: 4 },
-            { label: '-2 Std Dev', data: minus2SD, borderColor: '#16a34a', borderWidth: 1.2, borderDash: [6, 4], pointRadius: 0, pointHoverRadius: 0, fill: false, order: 5 },
-          ],
+      // Each dataset's visual style and data defined separately for readability.
+      const datasets = [
+        {
+          label: 'Buffett Indicator',
+          data: ratioData.map(d => ({ x: d.date, y: d.ratio })),
+          borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.08)',
+          borderWidth: 2, pointRadius: 0, pointHoverRadius: 5,
+          pointHoverBackgroundColor: '#3b82f6', fill: false, tension: 0.1, order: 0,
         },
+        {
+          label: 'Estimated (S&P 500)',
+          data: estimatedChartData,
+          borderColor: '#3b82f6', borderWidth: 2, borderDash: [5, 4],
+          pointRadius: 0, pointHoverRadius: 5,
+          pointHoverBackgroundColor: '#3b82f6', fill: false, tension: 0.1, order: 0,
+        },
+        {
+          label: 'Historical Trend',
+          data: trendData,
+          borderColor: '#888', borderWidth: 1.5, borderDash: [8, 4],
+          pointRadius: 0, pointHoverRadius: 0, fill: false, order: 1,
+        },
+        {
+          label: '+1 Std Dev',
+          data: plus1SD,
+          borderColor: '#f59e0b', borderWidth: 1.2, borderDash: [6, 4],
+          pointRadius: 0, pointHoverRadius: 0, fill: false, order: 2,
+        },
+        {
+          label: '+2 Std Dev',
+          data: plus2SD,
+          borderColor: '#ef4444', borderWidth: 1.2, borderDash: [6, 4],
+          pointRadius: 0, pointHoverRadius: 0, fill: false, order: 3,
+        },
+        {
+          label: '-1 Std Dev',
+          data: minus1SD,
+          borderColor: '#22c55e', borderWidth: 1.2, borderDash: [6, 4],
+          pointRadius: 0, pointHoverRadius: 0, fill: false, order: 4,
+        },
+        {
+          label: '-2 Std Dev',
+          data: minus2SD,
+          borderColor: '#16a34a', borderWidth: 1.2, borderDash: [6, 4],
+          pointRadius: 0, pointHoverRadius: 0, fill: false, order: 5,
+        },
+      ];
+
+      const chart = new Chart(canvasElement.getContext('2d'), {
+        type: 'line',
+        data: { datasets },
         options: {
           responsive: true,
           maintainAspectRatio: false,
@@ -518,15 +668,15 @@
               backgroundColor: '#0A0C14', titleColor: '#E4DED3', bodyColor: '#5A5870',
               borderColor: '#222638', borderWidth: 1, padding: 14, displayColors: true,
               titleFont: { family: "'JetBrains Mono', monospace", size: 11 },
-              bodyFont: { family: "'JetBrains Mono', monospace", size: 11 },
+              bodyFont:  { family: "'JetBrains Mono', monospace", size: 11 },
               callbacks: {
                 title(items) {
                   if (!items.length) return '';
                   return new Date(items[0].parsed.x).toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
                 },
                 label(item) {
-                  const value = item.parsed.y;
-                  const label = item.dataset.label;
+                  const value    = item.parsed.y;
+                  const label    = item.dataset.label;
                   if (label.includes('Std Dev')) {
                     const trendValue = trendByTimestamp.get(new Date(item.parsed.x).getTime());
                     if (typeof trendValue === 'number') {
@@ -541,7 +691,7 @@
             },
             zoom: {
               limits: { x: { min: startDate.getTime(), max: endTime.getTime() } },
-              pan: { enabled: true, mode: 'x' },
+              pan:  { enabled: true, mode: 'x' },
               zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' },
             },
           },
@@ -549,67 +699,38 @@
             x: {
               type: 'time',
               time: { unit: 'year', displayFormats: { year: 'yyyy' } },
-              grid: { color: '#0C0E16' },
-              ticks: { color: '#2E2C38', maxTicksLimit: 15, font: { family: "'JetBrains Mono', monospace", size: 11 } },
+              grid:   { color: '#0C0E16' },
+              ticks:  { color: '#2E2C38', maxTicksLimit: 15, font: { family: "'JetBrains Mono', monospace", size: 11 } },
               border: { color: '#14172200' },
             },
             y: {
               beginAtZero: true,
-              grid: { color: '#0C0E16' },
-              ticks: { color: '#2E2C38', callback: v => v + '%', font: { family: "'JetBrains Mono', monospace", size: 11 } },
-              title: { display: true, text: 'Market Cap / GDP (%)', color: '#2E2C38', font: { family: "'JetBrains Mono', monospace", size: 11 } },
+              grid:   { color: '#0C0E16' },
+              ticks:  { color: '#2E2C38', callback: v => v + '%', font: { family: "'JetBrains Mono', monospace", size: 11 } },
+              title:  { display: true, text: 'Market Cap / GDP (%)', color: '#2E2C38', font: { family: "'JetBrains Mono', monospace", size: 11 } },
               border: { color: '#14172200' },
             },
           },
         },
       });
 
-      canvasEl.parentElement.style.height = '500px';
-      canvasEl.style.height = '500px';
+      canvasElement.parentElement.style.height = '500px';
+      canvasElement.style.height = '500px';
       chart.resize();
 
-      const legendColors = {
+      // The Estimated dataset shares the Buffett Indicator color and is omitted from the legend
+      // to avoid confusion — it's the same line, just projected forward with dashes.
+      const legendColorMap = {
         'Buffett Indicator': { color: '#3b82f6', dashed: false },
-        'Historical Trend': { color: '#888', dashed: true },
-        '+1 Std Dev': { color: '#f59e0b', dashed: true },
-        '+2 Std Dev': { color: '#ef4444', dashed: true },
-        '-1 Std Dev': { color: '#22c55e', dashed: true },
-        '-2 Std Dev': { color: '#16a34a', dashed: true },
+        'Historical Trend':  { color: '#888',    dashed: true  },
+        '+1 Std Dev':        { color: '#f59e0b', dashed: true  },
+        '+2 Std Dev':        { color: '#ef4444', dashed: true  },
+        '-1 Std Dev':        { color: '#22c55e', dashed: true  },
+        '-2 Std Dev':        { color: '#16a34a', dashed: true  },
       };
-      const legendEl = document.getElementById('custom-legend');
-      chart.data.datasets.forEach((ds, i) => {
-        const item = document.createElement('div');
-        item.className = 'legend-item';
-        const info = legendColors[ds.label] || { color: ds.borderColor, dashed: false };
-        const swatch = document.createElement('span');
-        swatch.className = 'legend-swatch' + (info.dashed ? ' dashed' : '');
-        swatch.style.setProperty('--color', info.color);
-        if (!info.dashed) swatch.style.background = info.color;
-        item.appendChild(swatch);
-        item.appendChild(document.createTextNode(ds.label));
-        item.addEventListener('click', () => {
-          const meta = chart.getDatasetMeta(i);
-          meta.hidden = !meta.hidden;
-          item.style.opacity = meta.hidden ? 0.4 : 1;
-          chart.update();
-        });
-        legendEl.appendChild(item);
-      });
+      buildLegend(document.getElementById('custom-legend'), chart, legendColorMap);
 
-      document.querySelectorAll('[data-range]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          document.querySelectorAll('[data-range]').forEach(b => b.classList.remove('active'));
-          btn.classList.add('active');
-          const range = btn.dataset.range;
-          if (range === 'all') {
-            chart.resetZoom();
-          } else {
-            const now = lastDate.getTime();
-            chart.zoomScale('x', { min: now - parseInt(range) * MS_PER_YEAR, max: now + 30 * MS_PER_DAY });
-          }
-        });
-      });
-
+      bindRangeButtons('data-range', chart, lastDate);
       document.getElementById('reset-zoom').addEventListener('click', () => {
         chart.resetZoom();
         document.querySelectorAll('[data-range]').forEach(b => b.classList.remove('active'));
@@ -617,58 +738,55 @@
       });
     }
 
-    async function main(prefetchedGdpData) {
-      const loadingEl = document.getElementById('loading');
+    async function renderBuffettIndicator(prefetchedGdpData) {
+      const loadingElement = document.getElementById('loading');
 
       try {
         const { ratioData, usedFallbackSeries } = await fetchBuffettData(prefetchedGdpData);
         if (ratioData.length === 0) throw new Error('No data points computed');
+
         if (usedFallbackSeries) {
           document.querySelector('.source-note').textContent =
             'Data: Federal Reserve Bank of St. Louis (FRED) \u2014 Stock Market Capitalization to GDP for United States (DDDM01USA156NWDB).';
         }
 
-        const trend = computeBuffettTrend(ratioData);
-        const { currentPoint, estimatedChartData } = await fetchCurrentEstimate(ratioData[ratioData.length - 1]);
+        const trend                              = computeBuffettTrend(ratioData);
+        const { currentPoint, estimatedChartData } = await fetchCurrentDailyEstimate(ratioData[ratioData.length - 1]);
 
-        const latestX = (currentPoint.date.getTime() - trend.t0) / MS_PER_YEAR;
-        const latestTrend = trend.a * Math.exp(trend.b * latestX);
-        const meanRatio = ratioData.reduce((s, d) => s + d.ratio, 0) / ratioData.length;
+        const yearsFromT0 = (currentPoint.date.getTime() - trend.t0) / MS_PER_YEAR;
+        const latestTrend = trend.a * Math.exp(trend.b * yearsFromT0);
+        const meanRatio   = ratioData.reduce((sum, d) => sum + d.ratio, 0) / ratioData.length;
 
         renderBuffettStats({ currentPoint, latestTrend, stdLogResid: trend.stdLogResid, meanRatio });
         renderBuffettChart({ ratioData, estimatedChartData, ...trend });
 
       } catch (err) {
-        const errorDiv = document.createElement('div');
-        errorDiv.className = 'error';
-        const p1 = document.createElement('p');
-        p1.textContent = 'Error loading data: ' + (err.message || 'Unknown error');
-        const p2 = document.createElement('p');
-        p2.style.cssText = 'margin-top:8px;font-size:13px;color:#888';
-        p2.textContent = 'This page fetches live data from FRED. Make sure you have internet access. If the issue persists, FRED\'s API may be temporarily unavailable.';
-        errorDiv.appendChild(p1);
-        errorDiv.appendChild(p2);
-        loadingEl.replaceChildren(errorDiv);
+        const errorContainer = document.createElement('div');
+        errorContainer.className = 'error';
+
+        const headline = document.createElement('p');
+        headline.textContent = 'Error loading data: ' + (err.message || 'Unknown error');
+
+        const hint = document.createElement('p');
+        hint.style.cssText = 'margin-top:8px;font-size:13px;color:#888';
+        hint.textContent = 'This page fetches live data from FRED. Make sure you have internet access. If the issue persists, FRED\'s API may be temporarily unavailable.';
+
+        errorContainer.appendChild(headline);
+        errorContainer.appendChild(hint);
+        loadingElement.replaceChildren(errorContainer);
       }
     }
 
-    async function fetchShillerHistory() {
-      const resp = await fetch('/api/shiller');
-      if (!resp.ok) throw new Error('Shiller history fetch failed: ' + resp.status);
-      const json = await resp.json();
-      if (!json || !Array.isArray(json.data)) throw new Error('Shiller data: unexpected format');
-      const validated = json.data.filter(r =>
-        r !== null && typeof r === 'object' &&
-        typeof r.year === 'number' && r.year > 1800 && r.year < 2200 &&
-        typeof r.month === 'number' && r.month >= 1 && r.month <= 12 &&
-        (typeof r.cape === 'number' || r.cape === null) &&
-        (typeof r.long_interest_rate === 'number' || r.long_interest_rate === null)
-      );
-      if (validated.length === 0) throw new Error('Shiller data: no valid records after validation');
-      return validated;
+    // ── Shared chart utilities ─────────────────────────────────────────────────
+
+    // Returns a horizontal reference line spanning the full chart domain.
+    function horizontalLine(yValue, domainStart, domainEnd) {
+      return [{ x: domainStart, y: yValue }, { x: domainEnd, y: yValue }];
     }
 
-    function buildChartOptions(yLabel, yFormatter, xMin, xMax) {
+    // Builds Chart.js options shared by the CAPE, Fed Model, and Corp Profits charts.
+    // `formatYAxisTick` is both the tick callback and the tooltip value formatter.
+    function buildChartOptions(yAxisLabel, formatYAxisTick, xMin, xMax) {
       return {
         responsive: true,
         maintainAspectRatio: false,
@@ -677,26 +795,26 @@
           legend: { display: false },
           tooltip: {
             backgroundColor: '#0A0C14',
-            titleColor: '#E4DED3',
-            bodyColor: '#5A5870',
-            borderColor: '#222638',
+            titleColor:      '#E4DED3',
+            bodyColor:       '#5A5870',
+            borderColor:     '#222638',
             borderWidth: 1,
             padding: 14,
             titleFont: { family: "'JetBrains Mono', monospace", size: 11 },
-            bodyFont: { family: "'JetBrains Mono', monospace", size: 11 },
+            bodyFont:  { family: "'JetBrains Mono', monospace", size: 11 },
             callbacks: {
               title(items) {
                 if (!items.length) return '';
                 return new Date(items[0].parsed.x).toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
               },
               label(item) {
-                return ` ${item.dataset.label}: ${yFormatter(item.parsed.y)}`;
+                return ` ${item.dataset.label}: ${formatYAxisTick(item.parsed.y)}`;
               },
             },
           },
           zoom: {
             limits: { x: { min: xMin, max: xMax } },
-            pan: { enabled: true, mode: 'x' },
+            pan:  { enabled: true, mode: 'x' },
             zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' },
           },
         },
@@ -704,91 +822,107 @@
           x: {
             type: 'time',
             time: { unit: 'year', displayFormats: { year: 'yyyy' } },
-            grid: { color: '#0C0E16' },
-            ticks: { color: '#2E2C38', maxTicksLimit: 15, font: { family: "'JetBrains Mono', monospace", size: 11 } },
+            grid:   { color: '#0C0E16' },
+            ticks:  { color: '#2E2C38', maxTicksLimit: 15, font: { family: "'JetBrains Mono', monospace", size: 11 } },
             border: { color: '#14172200' },
           },
           y: {
-            grid: { color: '#0C0E16' },
-            ticks: { color: '#2E2C38', callback: yFormatter, font: { family: "'JetBrains Mono', monospace", size: 11 } },
-            title: { display: true, text: yLabel, color: '#2E2C38', font: { family: "'JetBrains Mono', monospace", size: 11 } },
+            grid:   { color: '#0C0E16' },
+            ticks:  { color: '#2E2C38', callback: formatYAxisTick, font: { family: "'JetBrains Mono', monospace", size: 11 } },
+            title:  { display: true, text: yAxisLabel, color: '#2E2C38', font: { family: "'JetBrains Mono', monospace", size: 11 } },
             border: { color: '#14172200' },
           },
         },
       };
     }
 
-    function buildLegend(legendEl, chart, colorMap) {
-      chart.data.datasets.forEach((ds, i) => {
-        const info = colorMap[ds.label] || { color: ds.borderColor, dashed: !!ds.borderDash };
-        const item = document.createElement('div');
+    // Populates a legend element from a chart's datasets. Each legend item toggles
+    // its dataset's visibility when clicked.
+    function buildLegend(legendElement, chart, colorMap) {
+      chart.data.datasets.forEach((dataset, index) => {
+        const info   = colorMap[dataset.label] || { color: dataset.borderColor, dashed: !!dataset.borderDash };
+        const item   = document.createElement('div');
         item.className = 'legend-item';
+
         const swatch = document.createElement('span');
         swatch.className = 'legend-swatch' + (info.dashed ? ' dashed' : '');
         swatch.style.setProperty('--color', info.color);
         if (!info.dashed) swatch.style.background = info.color;
+
         item.appendChild(swatch);
-        item.appendChild(document.createTextNode(ds.label));
+        item.appendChild(document.createTextNode(dataset.label));
         item.addEventListener('click', () => {
-          const meta = chart.getDatasetMeta(i);
+          const meta  = chart.getDatasetMeta(index);
           meta.hidden = !meta.hidden;
           item.style.opacity = meta.hidden ? 0.4 : 1;
           chart.update();
         });
-        legendEl.appendChild(item);
+        legendElement.appendChild(item);
       });
     }
 
-    function bindRangeButtons(attr, chart, lastDate) {
-      document.querySelectorAll(`[${attr}]`).forEach(btn => {
-        btn.addEventListener('click', () => {
-          document.querySelectorAll(`[${attr}]`).forEach(b => b.classList.remove('active'));
-          btn.classList.add('active');
-          const range = btn.getAttribute(attr);
+    // Wires up the time-range filter buttons (10Y, 20Y, All, etc.) for a chart.
+    function bindRangeButtons(dataAttribute, chart, mostRecentDate) {
+      document.querySelectorAll(`[${dataAttribute}]`).forEach(button => {
+        button.addEventListener('click', () => {
+          document.querySelectorAll(`[${dataAttribute}]`).forEach(b => b.classList.remove('active'));
+          button.classList.add('active');
+          const range = button.getAttribute(dataAttribute);
           if (range === 'all') {
             chart.resetZoom();
           } else {
-            const years = parseInt(range);
-            const start = lastDate.getTime() - years * MS_PER_YEAR;
-            chart.zoomScale('x', { min: start, max: lastDate.getTime() + 30 * MS_PER_DAY });
+            const yearsBack  = parseInt(range);
+            const windowStart = mostRecentDate.getTime() - yearsBack * MS_PER_YEAR;
+            const windowEnd   = mostRecentDate.getTime() + 30 * MS_PER_DAY;
+            chart.zoomScale('x', { min: windowStart, max: windowEnd });
           }
         });
       });
     }
 
-    function renderCapeChart(history) {
-      const records = history.filter(r => r.cape > 0 && r.year && r.month);
+    // ── Shiller CAPE chart ─────────────────────────────────────────────────────
+
+    function describeCapeDeviation(deviationPct) {
+      if (deviationPct > 80)  return 'Significantly overvalued';
+      if (deviationPct > 30)  return 'Overvalued';
+      if (deviationPct > -20) return 'Near fair value';
+      return 'Undervalued';
+    }
+
+    function renderCapeChart(shillerHistory) {
+      const records = shillerHistory.filter(r => r.cape > 0 && r.year && r.month);
       if (!records.length) {
         document.getElementById('cape-loading').innerHTML = '<div class="error">No CAPE data available.</div>';
         return;
       }
-      const capeData = records.map(r => ({ x: new Date(r.year, r.month - 1, 1), y: r.cape }));
-      const vals = capeData.map(d => d.y);
-      const mean = vals.reduce((s, v) => s + v, 0) / vals.length;
-      const std = Math.sqrt(vals.reduce((s, v) => s + (v - mean) ** 2, 0) / vals.length);
 
-      const latest = capeData[capeData.length - 1];
-      const devPct = ((latest.y - mean) / mean) * 100;
-      const capeEl = document.getElementById('cape-current');
-      capeEl.textContent = latest.y.toFixed(1) + 'x';
-      capeEl.className = 'stat-value ' + (latest.y > mean + std ? 'overvalued' : latest.y < mean - std ? 'undervalued' : 'fair');
+      const capeData  = records.map(r => ({ x: new Date(r.year, r.month - 1, 1), y: r.cape }));
+      const allValues = capeData.map(d => d.y);
+      const mean      = allValues.reduce((sum, v) => sum + v, 0) / allValues.length;
+      const stdDev    = Math.sqrt(allValues.reduce((sum, v) => sum + (v - mean) ** 2, 0) / allValues.length);
+
+      const latestPoint = capeData[capeData.length - 1];
+      const deviationPct = ((latestPoint.y - mean) / mean) * 100;
+
+      const currentElement = document.getElementById('cape-current');
+      currentElement.textContent = latestPoint.y.toFixed(1) + 'x';
+      currentElement.className   = 'stat-value ' + (latestPoint.y > mean + stdDev ? 'overvalued' : latestPoint.y < mean - stdDev ? 'undervalued' : 'fair');
+
       document.getElementById('cape-current-sub').textContent =
-        latest.x.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+        latestPoint.x.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
       document.getElementById('cape-avg').textContent = mean.toFixed(1) + 'x';
-      const devEl = document.getElementById('cape-deviation');
-      devEl.textContent = (devPct >= 0 ? '+' : '') + devPct.toFixed(0) + '%';
-      devEl.className = 'stat-value ' + (devPct > 30 ? 'overvalued' : devPct < -30 ? 'undervalued' : 'fair');
-      document.getElementById('cape-deviation-label').textContent =
-        devPct > 80 ? 'Significantly overvalued' :
-        devPct > 30 ? 'Overvalued' :
-        devPct > -20 ? 'Near fair value' : 'Undervalued';
 
-      const start = capeData[0].x;
-      const end = new Date(latest.x.getTime() + 2 * MS_PER_YEAR);
-      const hLine = y => [{ x: start, y }, { x: end, y }];
-      const meanLabel = `Historical Mean (${mean.toFixed(1)}x)`;
-      const p1Label = `+1 SD (${(mean + std).toFixed(1)}x)`;
-      const p2Label = `+2 SD (${(mean + 2 * std).toFixed(1)}x)`;
+      const deviationElement = document.getElementById('cape-deviation');
+      deviationElement.textContent = (deviationPct >= 0 ? '+' : '') + deviationPct.toFixed(0) + '%';
+      deviationElement.className   = 'stat-value ' + classifyDeviationPct(deviationPct, 30, 30);
+
+      document.getElementById('cape-deviation-label').textContent = describeCapeDeviation(deviationPct);
+
+      const domainStart = capeData[0].x;
+      const domainEnd   = new Date(latestPoint.x.getTime() + 2 * MS_PER_YEAR);
+      const meanLabel   = `Historical Mean (${mean.toFixed(1)}x)`;
+      const plus1Label  = `+1 SD (${(mean + stdDev).toFixed(1)}x)`;
+      const plus2Label  = `+2 SD (${(mean + 2 * stdDev).toFixed(1)}x)`;
 
       document.getElementById('cape-loading').style.display = 'none';
       const canvas = document.getElementById('cape-chart');
@@ -798,13 +932,30 @@
         type: 'line',
         data: {
           datasets: [
-            { label: 'Shiller CAPE', data: capeData, borderColor: '#a78bfa', backgroundColor: 'rgba(167,139,250,0.06)', borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 5, pointHoverBackgroundColor: '#a78bfa', fill: false, tension: 0.1, order: 0 },
-            { label: meanLabel, data: hLine(mean), borderColor: '#888', borderWidth: 1.5, borderDash: [8, 4], pointRadius: 0, fill: false, order: 1 },
-            { label: p1Label, data: hLine(mean + std), borderColor: '#f59e0b', borderWidth: 1, borderDash: [6, 4], pointRadius: 0, fill: false, order: 2 },
-            { label: p2Label, data: hLine(mean + 2 * std), borderColor: '#ef4444', borderWidth: 1, borderDash: [6, 4], pointRadius: 0, fill: false, order: 3 },
+            {
+              label: 'Shiller CAPE', data: capeData,
+              borderColor: '#a78bfa', backgroundColor: 'rgba(167,139,250,0.06)',
+              borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 5,
+              pointHoverBackgroundColor: '#a78bfa', fill: false, tension: 0.1, order: 0,
+            },
+            {
+              label: meanLabel, data: horizontalLine(mean, domainStart, domainEnd),
+              borderColor: '#888', borderWidth: 1.5, borderDash: [8, 4],
+              pointRadius: 0, fill: false, order: 1,
+            },
+            {
+              label: plus1Label, data: horizontalLine(mean + stdDev, domainStart, domainEnd),
+              borderColor: '#f59e0b', borderWidth: 1, borderDash: [6, 4],
+              pointRadius: 0, fill: false, order: 2,
+            },
+            {
+              label: plus2Label, data: horizontalLine(mean + 2 * stdDev, domainStart, domainEnd),
+              borderColor: '#ef4444', borderWidth: 1, borderDash: [6, 4],
+              pointRadius: 0, fill: false, order: 3,
+            },
           ],
         },
-        options: buildChartOptions('CAPE Ratio', v => v.toFixed(1) + 'x', capeData[0].x.getTime(), end.getTime()),
+        options: buildChartOptions('CAPE Ratio', v => v.toFixed(1) + 'x', domainStart.getTime(), domainEnd.getTime()),
       });
       canvas.parentElement.style.height = '400px';
       canvas.style.height = '400px';
@@ -812,11 +963,11 @@
 
       buildLegend(document.getElementById('cape-legend'), chart, {
         'Shiller CAPE': { color: '#a78bfa', dashed: false },
-        [meanLabel]: { color: '#888', dashed: true },
-        [p1Label]: { color: '#f59e0b', dashed: true },
-        [p2Label]: { color: '#ef4444', dashed: true },
+        [meanLabel]:    { color: '#888',    dashed: true  },
+        [plus1Label]:   { color: '#f59e0b', dashed: true  },
+        [plus2Label]:   { color: '#ef4444', dashed: true  },
       });
-      bindRangeButtons('data-cape-range', chart, latest.x);
+      bindRangeButtons('data-cape-range', chart, latestPoint.x);
       document.getElementById('cape-reset-zoom').addEventListener('click', () => {
         chart.resetZoom();
         document.querySelectorAll('[data-cape-range]').forEach(b => b.classList.remove('active'));
@@ -824,34 +975,44 @@
       });
     }
 
-    function renderFedModelChart(history) {
-      const records = history.filter(r => r.cape > 0 && r.long_interest_rate > 0 && r.year && r.month);
+    // ── Fed Model chart ────────────────────────────────────────────────────────
+
+    function describeFedModelSpread(spread) {
+      if (spread < -3) return 'Bonds significantly favored';
+      if (spread < -1) return 'Bonds marginally favored';
+      if (spread <  1) return 'Near parity';
+      if (spread <  3) return 'Stocks modestly favored';
+      return 'Stocks significantly favored';
+    }
+
+    function renderFedModelChart(shillerHistory) {
+      const records = shillerHistory.filter(r => r.cape > 0 && r.long_interest_rate > 0 && r.year && r.month);
       if (!records.length) {
         document.getElementById('fedm-loading').innerHTML = '<div class="error">No Fed Model data available.</div>';
         return;
       }
-      const dates = records.map(r => new Date(r.year, r.month - 1, 1));
-      const eyData = records.map((r, i) => ({ x: dates[i], y: 100 / r.cape }));
-      const byData = records.map((r, i) => ({ x: dates[i], y: r.long_interest_rate }));
-      const spreadData = records.map((r, i) => ({ x: dates[i], y: (100 / r.cape) - r.long_interest_rate }));
 
-      const last = records[records.length - 1];
-      const lastDate = dates[dates.length - 1];
-      const ey = 100 / last.cape;
-      const by = last.long_interest_rate;
-      const spread = ey - by;
+      const dates        = records.map(r => new Date(r.year, r.month - 1, 1));
+      const earningsYieldData = records.map((r, i) => ({ x: dates[i], y: 100 / r.cape }));
+      const bondYieldData     = records.map((r, i) => ({ x: dates[i], y: r.long_interest_rate }));
+      const spreadData        = records.map((r, i) => ({ x: dates[i], y: (100 / r.cape) - r.long_interest_rate }));
 
-      document.getElementById('fedm-earnings-yield').textContent = ey.toFixed(2) + '%';
-      document.getElementById('fedm-bond-yield').textContent = by.toFixed(2) + '%';
-      document.getElementById('fedm-bond-sub').textContent = lastDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
-      const spreadEl = document.getElementById('fedm-spread');
-      spreadEl.textContent = (spread >= 0 ? '+' : '') + spread.toFixed(2) + '%';
-      spreadEl.className = 'stat-value ' + (spread < -1 ? 'overvalued' : spread > 1 ? 'undervalued' : 'fair');
-      document.getElementById('fedm-spread-label').textContent =
-        spread < -3 ? 'Bonds significantly favored' :
-        spread < -1 ? 'Bonds marginally favored' :
-        spread < 1  ? 'Near parity' :
-        spread < 3  ? 'Stocks modestly favored' : 'Stocks significantly favored';
+      const lastRecord  = records[records.length - 1];
+      const lastDate    = dates[dates.length - 1];
+      const earningsYield = 100 / lastRecord.cape;
+      const bondYield     = lastRecord.long_interest_rate;
+      const spread        = earningsYield - bondYield;
+
+      document.getElementById('fedm-earnings-yield').textContent = earningsYield.toFixed(2) + '%';
+      document.getElementById('fedm-bond-yield').textContent     = bondYield.toFixed(2) + '%';
+      document.getElementById('fedm-bond-sub').textContent =
+        lastDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+
+      const spreadElement = document.getElementById('fedm-spread');
+      spreadElement.textContent = (spread >= 0 ? '+' : '') + spread.toFixed(2) + '%';
+      // Negative spread means bonds out-yield stocks (expensive market) → overvalued signal.
+      spreadElement.className   = 'stat-value ' + (spread < -1 ? 'overvalued' : spread > 1 ? 'undervalued' : 'fair');
+      document.getElementById('fedm-spread-label').textContent = describeFedModelSpread(spread);
 
       document.getElementById('fedm-loading').style.display = 'none';
       const canvas = document.getElementById('fedm-chart');
@@ -861,9 +1022,21 @@
         type: 'line',
         data: {
           datasets: [
-            { label: 'Earnings Yield (1/CAPE)', data: eyData, borderColor: '#22c55e', borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 5, fill: false, tension: 0.1, order: 0 },
-            { label: '10Y Interest Rate', data: byData, borderColor: '#f59e0b', borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 5, fill: false, tension: 0.1, order: 1 },
-            { label: 'Spread (EY − 10Y)', data: spreadData, borderColor: '#3b82f6', borderWidth: 1, borderDash: [5, 4], pointRadius: 0, fill: false, tension: 0.1, order: 2 },
+            {
+              label: 'Earnings Yield (1/CAPE)', data: earningsYieldData,
+              borderColor: '#22c55e', borderWidth: 1.5,
+              pointRadius: 0, pointHoverRadius: 5, fill: false, tension: 0.1, order: 0,
+            },
+            {
+              label: '10Y Interest Rate', data: bondYieldData,
+              borderColor: '#f59e0b', borderWidth: 1.5,
+              pointRadius: 0, pointHoverRadius: 5, fill: false, tension: 0.1, order: 1,
+            },
+            {
+              label: 'Spread (EY \u2212 10Y)', data: spreadData,
+              borderColor: '#3b82f6', borderWidth: 1, borderDash: [5, 4],
+              pointRadius: 0, fill: false, tension: 0.1, order: 2,
+            },
           ],
         },
         options: buildChartOptions('Yield (%)', v => v.toFixed(1) + '%', dates[0].getTime(), lastDate.getTime()),
@@ -873,9 +1046,9 @@
       chart.resize();
 
       buildLegend(document.getElementById('fedm-legend'), chart, {
-        'Earnings Yield (1/CAPE)': { color: '#22c55e', dashed: false },
-        '10Y Interest Rate': { color: '#f59e0b', dashed: false },
-        'Spread (EY − 10Y)': { color: '#3b82f6', dashed: true },
+        'Earnings Yield (1/CAPE)':    { color: '#22c55e', dashed: false },
+        '10Y Interest Rate':          { color: '#f59e0b', dashed: false },
+        'Spread (EY \u2212 10Y)':     { color: '#3b82f6', dashed: true  },
       });
       bindRangeButtons('data-fedm-range', chart, lastDate);
       document.getElementById('fedm-reset-zoom').addEventListener('click', () => {
@@ -885,19 +1058,26 @@
       });
     }
 
-    function renderCorpProfitsChart(cpData, gdpData) {
-      const gdpMap = new Map();
-      for (const d of gdpData) {
-        const key = toQuarterKey(d.date);
-        gdpMap.set(key, d.value);
+    // ── Corporate Profits / GDP chart ──────────────────────────────────────────
+
+    function describeProfitMarginDeviation(deviationPct) {
+      if (deviationPct > 60)  return 'Significantly elevated';
+      if (deviationPct > 20)  return 'Above historical average';
+      if (deviationPct > -20) return 'Near historical average';
+      return 'Below historical average';
+    }
+
+    function renderCorpProfitsChart(corpProfitsData, gdpData) {
+      const gdpByQuarter = new Map();
+      for (const dataPoint of gdpData) {
+        gdpByQuarter.set(toQuarterKey(dataPoint.date), dataPoint.value);
       }
 
       const seriesData = [];
-      for (const d of cpData) {
-        const key = toQuarterKey(d.date);
-        const gdpVal = gdpMap.get(key);
-        if (gdpVal && gdpVal > 0) {
-          seriesData.push({ x: d.date, y: (d.value / gdpVal) * 100 });
+      for (const dataPoint of corpProfitsData) {
+        const gdpValue = gdpByQuarter.get(toQuarterKey(dataPoint.date));
+        if (gdpValue && gdpValue > 0) {
+          seriesData.push({ x: dataPoint.date, y: (dataPoint.value / gdpValue) * 100 });
         }
       }
 
@@ -906,32 +1086,30 @@
         return;
       }
 
-      const vals = seriesData.map(d => d.y);
-      const mean = vals.reduce((s, v) => s + v, 0) / vals.length;
-      const std = Math.sqrt(vals.reduce((s, v) => s + (v - mean) ** 2, 0) / vals.length);
-      const latest = seriesData[seriesData.length - 1];
-      const devPct = ((latest.y - mean) / mean) * 100;
+      const allValues  = seriesData.map(d => d.y);
+      const mean       = allValues.reduce((sum, v) => sum + v, 0) / allValues.length;
+      const stdDev     = Math.sqrt(allValues.reduce((sum, v) => sum + (v - mean) ** 2, 0) / allValues.length);
+      const latestPoint = seriesData[seriesData.length - 1];
+      const deviationPct = ((latestPoint.y - mean) / mean) * 100;
 
-      const cpEl = document.getElementById('cp-current');
-      cpEl.textContent = latest.y.toFixed(1) + '%';
-      cpEl.className = 'stat-value ' + (latest.y > mean + std ? 'overvalued' : latest.y < mean - std ? 'undervalued' : 'fair');
+      const currentElement = document.getElementById('cp-current');
+      currentElement.textContent = latestPoint.y.toFixed(1) + '%';
+      currentElement.className   = 'stat-value ' + (latestPoint.y > mean + stdDev ? 'overvalued' : latestPoint.y < mean - stdDev ? 'undervalued' : 'fair');
+
       document.getElementById('cp-current-sub').textContent =
-        latest.x.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+        latestPoint.x.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
       document.getElementById('cp-avg').textContent = mean.toFixed(1) + '%';
-      const devEl = document.getElementById('cp-deviation');
-      devEl.textContent = (devPct >= 0 ? '+' : '') + devPct.toFixed(0) + '%';
-      devEl.className = 'stat-value ' + (devPct > 30 ? 'overvalued' : devPct < -30 ? 'undervalued' : 'fair');
-      document.getElementById('cp-deviation-label').textContent =
-        devPct > 60 ? 'Significantly elevated' :
-        devPct > 20 ? 'Above historical average' :
-        devPct > -20 ? 'Near historical average' : 'Below historical average';
 
-      const domStart = seriesData[0].x;
-      const domEnd = new Date(latest.x.getTime() + 2 * MS_PER_YEAR);
-      const hLine = y => [{ x: domStart, y }, { x: domEnd, y }];
-      const meanLabel = `Historical Mean (${mean.toFixed(1)}%)`;
-      const p1Label = `+1 SD (${(mean + std).toFixed(1)}%)`;
-      const m1Label = `-1 SD (${(mean - std).toFixed(1)}%)`;
+      const deviationElement = document.getElementById('cp-deviation');
+      deviationElement.textContent = (deviationPct >= 0 ? '+' : '') + deviationPct.toFixed(0) + '%';
+      deviationElement.className   = 'stat-value ' + classifyDeviationPct(deviationPct, 30, 30);
+      document.getElementById('cp-deviation-label').textContent = describeProfitMarginDeviation(deviationPct);
+
+      const domainStart  = seriesData[0].x;
+      const domainEnd    = new Date(latestPoint.x.getTime() + 2 * MS_PER_YEAR);
+      const meanLabel    = `Historical Mean (${mean.toFixed(1)}%)`;
+      const plus1Label   = `+1 SD (${(mean + stdDev).toFixed(1)}%)`;
+      const minus1Label  = `-1 SD (${(mean - stdDev).toFixed(1)}%)`;
 
       document.getElementById('cp-loading').style.display = 'none';
       const canvas = document.getElementById('cp-chart');
@@ -941,13 +1119,30 @@
         type: 'line',
         data: {
           datasets: [
-            { label: 'Corp. Profits / GDP', data: seriesData, borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,0.06)', borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 5, pointHoverBackgroundColor: '#38bdf8', fill: false, tension: 0.1, order: 0 },
-            { label: meanLabel, data: hLine(mean), borderColor: '#888', borderWidth: 1.5, borderDash: [8, 4], pointRadius: 0, fill: false, order: 1 },
-            { label: p1Label, data: hLine(mean + std), borderColor: '#f59e0b', borderWidth: 1, borderDash: [6, 4], pointRadius: 0, fill: false, order: 2 },
-            { label: m1Label, data: hLine(mean - std), borderColor: '#22c55e', borderWidth: 1, borderDash: [6, 4], pointRadius: 0, fill: false, order: 3 },
+            {
+              label: 'Corp. Profits / GDP', data: seriesData,
+              borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,0.06)',
+              borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 5,
+              pointHoverBackgroundColor: '#38bdf8', fill: false, tension: 0.1, order: 0,
+            },
+            {
+              label: meanLabel, data: horizontalLine(mean, domainStart, domainEnd),
+              borderColor: '#888', borderWidth: 1.5, borderDash: [8, 4],
+              pointRadius: 0, fill: false, order: 1,
+            },
+            {
+              label: plus1Label, data: horizontalLine(mean + stdDev, domainStart, domainEnd),
+              borderColor: '#f59e0b', borderWidth: 1, borderDash: [6, 4],
+              pointRadius: 0, fill: false, order: 2,
+            },
+            {
+              label: minus1Label, data: horizontalLine(mean - stdDev, domainStart, domainEnd),
+              borderColor: '#22c55e', borderWidth: 1, borderDash: [6, 4],
+              pointRadius: 0, fill: false, order: 3,
+            },
           ],
         },
-        options: buildChartOptions('Corp. Profits / GDP (%)', v => v.toFixed(1) + '%', domStart.getTime(), domEnd.getTime()),
+        options: buildChartOptions('Corp. Profits / GDP (%)', v => v.toFixed(1) + '%', domainStart.getTime(), domainEnd.getTime()),
       });
       canvas.parentElement.style.height = '400px';
       canvas.style.height = '400px';
@@ -955,11 +1150,11 @@
 
       buildLegend(document.getElementById('cp-legend'), chart, {
         'Corp. Profits / GDP': { color: '#38bdf8', dashed: false },
-        [meanLabel]: { color: '#888', dashed: true },
-        [p1Label]: { color: '#f59e0b', dashed: true },
-        [m1Label]: { color: '#22c55e', dashed: true },
+        [meanLabel]:           { color: '#888',    dashed: true  },
+        [plus1Label]:          { color: '#f59e0b', dashed: true  },
+        [minus1Label]:         { color: '#22c55e', dashed: true  },
       });
-      bindRangeButtons('data-cp-range', chart, latest.x);
+      bindRangeButtons('data-cp-range', chart, latestPoint.x);
       document.getElementById('cp-reset-zoom').addEventListener('click', () => {
         chart.resetZoom();
         document.querySelectorAll('[data-cp-range]').forEach(b => b.classList.remove('active'));
@@ -967,12 +1162,14 @@
       });
     }
 
-    async function fetchGauges(prefetchedGdpData) {
+    // ── Shiller-based charts (CAPE + Fed Model + Corp Profits) ─────────────────
+
+    async function renderShillerBasedCharts(prefetchedGdpData) {
       const fetchGdp = prefetchedGdpData
         ? Promise.resolve(prefetchedGdpData)
         : fetchFredSeries('GDP', '1947-01-01');
 
-      const [shillerResult, cpResult, gdpResult] = await Promise.allSettled([
+      const [shillerResult, corpProfitsResult, gdpResult] = await Promise.allSettled([
         fetchShillerHistory(),
         fetchFredSeries('CP', '1947-01-01'),
         fetchGdp,
@@ -982,28 +1179,32 @@
         renderCapeChart(shillerResult.value);
         renderFedModelChart(shillerResult.value);
       } else {
-        const msg = '<div class="error">Could not load Shiller data.</div>';
-        document.getElementById('cape-loading').innerHTML = msg;
-        document.getElementById('fedm-loading').innerHTML = msg;
+        const errorHtml = '<div class="error">Could not load Shiller data.</div>';
+        document.getElementById('cape-loading').innerHTML = errorHtml;
+        document.getElementById('fedm-loading').innerHTML = errorHtml;
       }
 
-      const cpData = cpResult.status === 'fulfilled' ? cpResult.value : [];
-      const gdpData = gdpResult.status === 'fulfilled' ? gdpResult.value : [];
-      if (cpData.length > 0 && gdpData.length > 0) {
-        renderCorpProfitsChart(cpData, gdpData);
+      const corpProfitsData = corpProfitsResult.status === 'fulfilled' ? corpProfitsResult.value : [];
+      const gdpData         = gdpResult.status === 'fulfilled'         ? gdpResult.value         : [];
+      if (corpProfitsData.length > 0 && gdpData.length > 0) {
+        renderCorpProfitsChart(corpProfitsData, gdpData);
       } else {
         document.getElementById('cp-loading').innerHTML = '<div class="error">Could not load FRED data.</div>';
       }
     }
 
-    // Fetch GDP once and share it across main() and fetchGauges() to avoid duplicate requests.
+    // ── Bootstrap ──────────────────────────────────────────────────────────────
+    // Fetch GDP once and share it across both render functions to avoid a
+    // duplicate network request (both the Buffett Indicator and Corp Profits / GDP
+    // need GDP data independently).
+
     fetchFredSeries('GDP', '1945-01-01').then((gdpData) => {
-      main(gdpData);
-      fetchGauges(gdpData);
+      renderBuffettIndicator(gdpData);
+      renderShillerBasedCharts(gdpData);
     }).catch(() => {
-      // GDP fetch failed — let each function fall back independently.
-      main(null);
-      fetchGauges(null);
+      // GDP fetch failed — let each function handle the miss independently.
+      renderBuffettIndicator(null);
+      renderShillerBasedCharts(null);
     });
   </script>
 

@@ -1,10 +1,13 @@
 const http  = require("http");
 const https = require("https");
-const fs = require("fs");
-const path = require("path");
+const fs    = require("fs");
+const path  = require("path");
 const { URL } = require("url");
 
-// Load .env.local then .env (later files don't overwrite earlier ones)
+// ── Environment ───────────────────────────────────────────────────────────────
+// Load .env.local first, then .env. Earlier files win — variables already set
+// in the environment are never overwritten.
+
 for (const envFile of [".env.local", ".env"]) {
   try {
     const lines = fs.readFileSync(path.join(__dirname, envFile), "utf8").split("\n");
@@ -14,78 +17,96 @@ for (const envFile of [".env.local", ".env"]) {
         process.env[match[1]] = match[2].replace(/^["']|["']$/g, "");
       }
     }
-  } catch { /* file doesn't exist, skip */ }
+  } catch { /* file doesn't exist — skip it */ }
 }
 
-const port = Number(process.env.PORT) || 3443;
-const rootDir = __dirname;
+const port        = Number(process.env.PORT) || 3443;
+const rootDir     = __dirname;
 const FRED_API_KEY = process.env.FRED_API_KEY;
+
 if (!FRED_API_KEY) {
   console.error("ERROR: FRED_API_KEY environment variable is not set.");
   process.exit(1);
 }
 
-const ALLOWED_FRED_SERIES = new Set([
-  'WILL5000INDFC', 'GDP', 'GDPA', 'DDDM01USA156NWDB',
-  'GS10', 'CPIAUCSL', 'UNRATE', 'FEDFUNDS',
-  'NCBEILQ027S', 'SP500', 'CP',
-]);
+// ── TLS ───────────────────────────────────────────────────────────────────────
+// Use HTTPS locally when mkcert certificates are present; fall back to HTTP.
+// In production the platform (Railway) terminates TLS upstream.
 
 let tlsOptions = null;
 try {
   tlsOptions = {
-    key: fs.readFileSync(path.join(rootDir, "localhost+2-key.pem")),
+    key:  fs.readFileSync(path.join(rootDir, "localhost+2-key.pem")),
     cert: fs.readFileSync(path.join(rootDir, "localhost+2.pem")),
   };
 } catch {
   if (process.env.NODE_ENV !== "production") {
-    console.warn("WARNING: TLS certificate not found — running over plain HTTP.\n  To enable HTTPS locally: mkcert localhost 127.0.0.1 ::1");
+    console.warn(
+      "WARNING: TLS certificate not found — running over plain HTTP.\n" +
+      "  To enable HTTPS locally: mkcert localhost 127.0.0.1 ::1"
+    );
   }
 }
 
-// ── TTLs ──────────────────────────────────────────────────────────────────────
+// ── Allowlist ─────────────────────────────────────────────────────────────────
+// Only these FRED series IDs may be requested through the proxy. Any request
+// for a series not on this list gets a 400 immediately, before touching FRED.
+
+const ALLOWED_FRED_SERIES = new Set([
+  "WILL5000INDFC", "GDP", "GDPA", "DDDM01USA156NWDB",
+  "GS10", "CPIAUCSL", "UNRATE", "FEDFUNDS",
+  "NCBEILQ027S", "SP500", "CP",
+]);
+
+// ── Cache TTLs ────────────────────────────────────────────────────────────────
+// Series that update infrequently get a full-day TTL. Everything else defaults
+// to six hours so near-real-time series (e.g. SP500) stay reasonably fresh.
 
 const ONE_HOUR_MS  = 60 * 60 * 1000;
 const SIX_HOURS_MS = 6 * ONE_HOUR_MS;
 const ONE_DAY_MS   = 24 * ONE_HOUR_MS;
 
-const FRED_TTL_MS = {
-  SP500:              ONE_HOUR_MS,
-  GDPA:               ONE_DAY_MS,
-  GDP:                ONE_DAY_MS,
-  NCBEILQ027S:        ONE_DAY_MS,
-  CP:                 ONE_DAY_MS,
-  DDDM01USA156NWDB:   ONE_DAY_MS,
+const SERIES_TTL_OVERRIDES = {
+  SP500:            ONE_HOUR_MS,
+  GDPA:             ONE_DAY_MS,
+  GDP:              ONE_DAY_MS,
+  NCBEILQ027S:      ONE_DAY_MS,
+  CP:               ONE_DAY_MS,
+  DDDM01USA156NWDB: ONE_DAY_MS,
 };
 
-function fredTtl(seriesId) {
-  return FRED_TTL_MS[seriesId] ?? SIX_HOURS_MS;
+function getTtlForSeries(seriesId) {
+  return SERIES_TTL_OVERRIDES[seriesId] ?? SIX_HOURS_MS;
 }
 
 // ── In-memory cache ───────────────────────────────────────────────────────────
-// Each entry: { body: Buffer, statusCode: number, storedAt: number, ttlMs: number }
+// A simple Map with TTL-based expiry. Capped at CACHE_MAX_ENTRIES to prevent
+// unbounded growth. When the cap is hit, the oldest entry is evicted (Map
+// preserves insertion order, so .keys().next().value is always the oldest).
+//
+// Each entry shape: { body: Buffer, statusCode: number, storedAt: number, ttlMs: number }
 
-const CACHE_MAX_SIZE = 200;
+const CACHE_MAX_ENTRIES = 200;
 const cache = new Map();
 
-function cacheKey(seriesId, observationStart, frequency) {
-  return `${seriesId}|${observationStart ?? ''}|${frequency ?? ''}`;
+function buildCacheKey(seriesId, observationStart, frequency) {
+  return `${seriesId}|${observationStart ?? ""}|${frequency ?? ""}`;
 }
 
-function getCached(key) {
+function getFromCache(key) {
   const entry = cache.get(key);
   if (!entry) return null;
-  if (Date.now() - entry.storedAt > entry.ttlMs) {
+
+  const isExpired = Date.now() - entry.storedAt > entry.ttlMs;
+  if (isExpired) {
     cache.delete(key);
     return null;
   }
   return entry;
 }
 
-// Fix 5: Cap the cache key space at CACHE_MAX_SIZE.
-// Map preserves insertion order, so .keys().next().value is always the oldest entry.
 function storeInCache(key, body, statusCode, ttlMs) {
-  if (cache.size >= CACHE_MAX_SIZE && !cache.has(key)) {
+  if (cache.size >= CACHE_MAX_ENTRIES && !cache.has(key)) {
     const oldestKey = cache.keys().next().value;
     cache.delete(oldestKey);
   }
@@ -93,66 +114,70 @@ function storeInCache(key, body, statusCode, ttlMs) {
 }
 
 // ── In-flight request coalescing ──────────────────────────────────────────────
-// Fix 1: Prevents thundering-herd cache misses from triggering N upstream calls.
-// Maps a cache key to the Promise of the in-progress upstream fetch.
+// When multiple requests arrive for the same uncached resource at once, only
+// one upstream fetch is made. All callers await the same Promise, preventing
+// a thundering-herd of duplicate upstream calls.
+//
+// Maps a cache key → Promise<{ body: Buffer, statusCode: number }>
 
-const inFlight = new Map();
+const inFlightRequests = new Map();
 
 // ── Rate limiter ──────────────────────────────────────────────────────────────
-// Sliding window via per-IP timestamps and a global counter.
+// Sliding-window rate limiter. Timestamps for each IP (and globally) are kept
+// in arrays; old entries are pruned before each check.
 
-const RATE_WINDOW_MS     = 60 * 1000; // 1 minute
-const PER_IP_MAX         = 10;
-const GLOBAL_MAX         = 80;
+const RATE_LIMIT = {
+  windowMs:   60 * 1000, // 1-minute window
+  perIpMax:   10,        // requests per IP per window
+  globalMax:  80,        // total requests across all IPs per window
+};
 
-// Map<ip, number[]> — stores request timestamps per IP
-const ipWindows = new Map();
-// number[] — global request timestamps
-const globalWindow = [];
+const requestTimestampsByIp = new Map(); // Map<ip, number[]>
+const globalRequestTimestamps = [];      // number[]
 
-function pruneWindow(timestamps) {
-  const cutoff = Date.now() - RATE_WINDOW_MS;
-  let i = 0;
-  while (i < timestamps.length && timestamps[i] < cutoff) i++;
-  timestamps.splice(0, i);
+function pruneOldTimestamps(timestamps) {
+  const cutoff = Date.now() - RATE_LIMIT.windowMs;
+  let countToRemove = 0;
+  while (countToRemove < timestamps.length && timestamps[countToRemove] < cutoff) {
+    countToRemove++;
+  }
+  timestamps.splice(0, countToRemove);
 }
 
-// Fix 4: Evict stale ipWindows entries every 5 minutes to prevent unbounded Map growth.
+// Evict IPs with no recent requests every 5 minutes to prevent unbounded Map growth.
 setInterval(() => {
-  for (const [ip, timestamps] of ipWindows) {
-    pruneWindow(timestamps);
-    if (timestamps.length === 0) ipWindows.delete(ip);
+  for (const [ip, timestamps] of requestTimestampsByIp) {
+    pruneOldTimestamps(timestamps);
+    if (timestamps.length === 0) requestTimestampsByIp.delete(ip);
   }
 }, 5 * 60 * 1000).unref();
 
 function checkRateLimit(ip) {
   const now = Date.now();
 
-  // Prune and check global window
-  pruneWindow(globalWindow);
-  if (globalWindow.length >= GLOBAL_MAX) {
-    return { allowed: false, retryAfter: Math.ceil(RATE_WINDOW_MS / 1000) };
+  pruneOldTimestamps(globalRequestTimestamps);
+  if (globalRequestTimestamps.length >= RATE_LIMIT.globalMax) {
+    return { allowed: false, retryAfterSeconds: Math.ceil(RATE_LIMIT.windowMs / 1000) };
   }
 
-  // Prune and check per-IP window
-  if (!ipWindows.has(ip)) ipWindows.set(ip, []);
-  const ipTs = ipWindows.get(ip);
-  pruneWindow(ipTs);
-  if (ipTs.length >= PER_IP_MAX) {
-    const oldestTs = ipTs[0];
-    const retryAfter = Math.ceil((oldestTs + RATE_WINDOW_MS - now) / 1000);
-    return { allowed: false, retryAfter: Math.max(1, retryAfter) };
+  if (!requestTimestampsByIp.has(ip)) requestTimestampsByIp.set(ip, []);
+  const ipTimestamps = requestTimestampsByIp.get(ip);
+  pruneOldTimestamps(ipTimestamps);
+
+  if (ipTimestamps.length >= RATE_LIMIT.perIpMax) {
+    const windowResetAt = ipTimestamps[0] + RATE_LIMIT.windowMs;
+    const retryAfterSeconds = Math.max(1, Math.ceil((windowResetAt - now) / 1000));
+    return { allowed: false, retryAfterSeconds };
   }
 
-  // Record the request
-  ipTs.push(now);
-  globalWindow.push(now);
+  ipTimestamps.push(now);
+  globalRequestTimestamps.push(now);
   return { allowed: true };
 }
 
 // ── Static file helpers ───────────────────────────────────────────────────────
 
-const contentTypes = {
+const CONTENT_TYPE_BY_EXTENSION = {
   ".html":        "text/html; charset=utf-8",
   ".js":          "text/javascript; charset=utf-8",
   ".css":         "text/css; charset=utf-8",
@@ -170,23 +195,82 @@ const contentTypes = {
   ".woff2":       "font/woff2",
 };
 
-function resolveFile(requestPath) {
+// Resolve a URL path to an absolute filesystem path, rejecting anything that
+// tries to escape the root directory (path traversal protection).
+function resolveStaticFilePath(requestPath) {
   const cleaned = decodeURIComponent(requestPath.split("?")[0]);
-  const filePath = cleaned === "/" ? "/index.html" : cleaned;
-  const absolutePath = path.normalize(path.join(rootDir, filePath));
+  const relativePath = cleaned === "/" ? "/index.html" : cleaned;
+  const absolutePath = path.normalize(path.join(rootDir, relativePath));
 
-  if (!absolutePath.startsWith(rootDir + path.sep) && absolutePath !== rootDir) {
-    return null;
-  }
+  const isInsideRoot = absolutePath.startsWith(rootDir + path.sep) || absolutePath === rootDir;
+  if (!isInsideRoot) return null;
+
   return absolutePath;
+}
+
+function staticCacheHeaders(isHtmlFile) {
+  // HTML must always revalidate so users get the latest version immediately.
+  // All other assets are content-addressed and can be cached indefinitely.
+  if (isHtmlFile) return { "Cache-Control": "no-cache" };
+  return { "Cache-Control": "public, max-age=31536000, immutable" };
 }
 
 // ── Request handlers ──────────────────────────────────────────────────────────
 
 function getClientIp(req) {
-  const forwarded = req.headers["x-forwarded-for"];
-  if (forwarded) return forwarded.split(",")[0].trim();
+  const forwardedFor = req.headers["x-forwarded-for"];
+  if (forwardedFor) return forwardedFor.split(",")[0].trim();
   return req.socket?.remoteAddress ?? "unknown";
+}
+
+// Shared response writer for both FRED and Shiller proxy handlers.
+function sendJsonResponse(res, statusCode, body, securityHeaders) {
+  res.writeHead(statusCode, {
+    "Content-Type": "application/json",
+    "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
+    ...securityHeaders,
+  });
+  res.end(body);
+}
+
+// Shared upstream fetcher used by both FRED and Shiller proxy handlers.
+// Fetches `url`, stores the result in `cacheKey`, and returns a Promise that
+// resolves to `{ body: Buffer, statusCode: number }`.
+function fetchUpstream(url, cacheKey, ttlMs) {
+  const fetchPromise = new Promise((resolve, reject) => {
+    const upstreamReq = https.get(url, (upstreamRes) => {
+      const chunks = [];
+      upstreamRes.on("data", (chunk) => chunks.push(chunk));
+      upstreamRes.on("end", () => {
+        const body = Buffer.concat(chunks);
+        storeInCache(cacheKey, body, upstreamRes.statusCode, ttlMs);
+        resolve({ body, statusCode: upstreamRes.statusCode });
+      });
+    });
+
+    upstreamReq.setTimeout(8000, () => {
+      upstreamReq.destroy();
+      reject(new Error("Gateway Timeout"));
+    });
+
+    upstreamReq.on("error", (err) => {
+      if (err.code !== "ECONNRESET") console.error("Upstream proxy error:", err);
+      reject(err);
+    });
+  });
+
+  inFlightRequests.set(cacheKey, fetchPromise);
+  fetchPromise.finally(() => inFlightRequests.delete(cacheKey));
+
+  return fetchPromise;
+}
+
+// Send an error response, choosing 504 for timeouts and 502 for all other failures.
+function sendUpstreamErrorResponse(res, err, securityHeaders) {
+  if (res.headersSent) return;
+  const isTimeout = err.message === "Gateway Timeout";
+  res.writeHead(isTimeout ? 504 : 502, { "Content-Type": "text/plain", ...securityHeaders });
+  res.end(isTimeout ? "Gateway Timeout" : "Upstream error");
 }
 
 function handleFredRequest(req, res, parsedUrl, securityHeaders) {
@@ -197,11 +281,11 @@ function handleFredRequest(req, res, parsedUrl, securityHeaders) {
   }
 
   const ip = getClientIp(req);
-  const { allowed, retryAfter } = checkRateLimit(ip);
+  const { allowed, retryAfterSeconds } = checkRateLimit(ip);
   if (!allowed) {
     res.writeHead(429, {
       "Content-Type": "text/plain",
-      "Retry-After": String(retryAfter),
+      "Retry-After": String(retryAfterSeconds),
       ...securityHeaders,
     });
     res.end("Too Many Requests");
@@ -217,25 +301,30 @@ function handleFredRequest(req, res, parsedUrl, securityHeaders) {
 
   const observationStart = parsedUrl.searchParams.get("observation_start");
   const frequency        = parsedUrl.searchParams.get("frequency");
+  const cacheKey = buildCacheKey(seriesId, observationStart, frequency);
 
-  const key = cacheKey(seriesId, observationStart, frequency);
-  const cached = getCached(key);
+  const cached = getFromCache(cacheKey);
   if (cached) {
-    res.writeHead(cached.statusCode, {
-      "Content-Type": "application/json",
-      "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
-      ...securityHeaders,
-    });
-    res.end(cached.body);
+    sendJsonResponse(res, cached.statusCode, cached.body, securityHeaders);
     return;
   }
 
+  // If an identical request is already in-flight, attach to its Promise instead
+  // of making a second upstream call.
+  if (inFlightRequests.has(cacheKey)) {
+    inFlightRequests.get(cacheKey)
+      .then(({ body, statusCode }) => sendJsonResponse(res, statusCode, body, securityHeaders))
+      .catch((err) => sendUpstreamErrorResponse(res, err, securityHeaders));
+    return;
+  }
+
+  // Build the upstream FRED URL, sanitizing each optional parameter before use.
   const fredParams = new URLSearchParams();
   fredParams.set("series_id", seriesId);
   if (observationStart && /^\d{4}-\d{2}-\d{2}$/.test(observationStart)) {
     fredParams.set("observation_start", observationStart);
   }
-  if (frequency && ['d', 'w', 'bw', 'm', 'q', 'sa', 'a'].includes(frequency)) {
+  if (frequency && ["d", "w", "bw", "m", "q", "sa", "a"].includes(frequency)) {
     fredParams.set("frequency", frequency);
   }
   fredParams.set("file_type", "json");
@@ -243,67 +332,13 @@ function handleFredRequest(req, res, parsedUrl, securityHeaders) {
 
   const fredUrl = `https://api.stlouisfed.org/fred/series/observations?${fredParams.toString()}`;
 
-  // Fix 1: Coalesce concurrent cache misses for the same key into one upstream call.
-  if (inFlight.has(key)) {
-    inFlight.get(key).then(({ body, statusCode }) => {
-      res.writeHead(statusCode, {
-        "Content-Type": "application/json",
-        "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
-        ...securityHeaders,
-      });
-      res.end(body);
-    }).catch(() => {
-      if (!res.headersSent) {
-        res.writeHead(502, { "Content-Type": "text/plain", ...securityHeaders });
-        res.end("Upstream error");
-      }
-    });
-    return;
-  }
-
-  const fetchPromise = new Promise((resolve, reject) => {
-    const fredReq = https.get(fredUrl, (fredRes) => {
-      const chunks = [];
-      fredRes.on("data", (chunk) => chunks.push(chunk));
-      fredRes.on("end", () => {
-        const body = Buffer.concat(chunks);
-        storeInCache(key, body, fredRes.statusCode, fredTtl(seriesId));
-        resolve({ body, statusCode: fredRes.statusCode });
-      });
-    });
-
-    fredReq.setTimeout(8000, () => {
-      fredReq.destroy();
-      reject(new Error("Gateway Timeout"));
-    });
-
-    fredReq.on("error", (err) => {
-      if (err.code !== "ECONNRESET") console.error("FRED proxy error:", err);
-      reject(err);
-    });
-  });
-
-  inFlight.set(key, fetchPromise);
-  fetchPromise.finally(() => inFlight.delete(key));
-
-  fetchPromise.then(({ body, statusCode }) => {
-    res.writeHead(statusCode, {
-      "Content-Type": "application/json",
-      "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
-      ...securityHeaders,
-    });
-    res.end(body);
-  }).catch((err) => {
-    if (!res.headersSent) {
-      const isTimeout = err.message === "Gateway Timeout";
-      res.writeHead(isTimeout ? 504 : 502, { "Content-Type": "text/plain", ...securityHeaders });
-      res.end(isTimeout ? "Gateway Timeout" : "Upstream error");
-    }
-  });
+  fetchUpstream(fredUrl, cacheKey, getTtlForSeries(seriesId))
+    .then(({ body, statusCode }) => sendJsonResponse(res, statusCode, body, securityHeaders))
+    .catch((err) => sendUpstreamErrorResponse(res, err, securityHeaders));
 }
 
-const SHILLER_URL = "https://posix4e.github.io/shiller_wrapper_data/data/stock_market_data.json";
-const SHILLER_CACHE_KEY = "shiller";
+const SHILLER_DATA_URL   = "https://posix4e.github.io/shiller_wrapper_data/data/stock_market_data.json";
+const SHILLER_CACHE_KEY  = "shiller";
 
 function handleShillerRequest(req, res, securityHeaders) {
   if (req.method !== "GET") {
@@ -312,85 +347,26 @@ function handleShillerRequest(req, res, securityHeaders) {
     return;
   }
 
-  const cached = getCached(SHILLER_CACHE_KEY);
+  const cached = getFromCache(SHILLER_CACHE_KEY);
   if (cached) {
-    res.writeHead(cached.statusCode, {
-      "Content-Type": "application/json",
-      "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
-      ...securityHeaders,
-    });
-    res.end(cached.body);
+    sendJsonResponse(res, cached.statusCode, cached.body, securityHeaders);
     return;
   }
 
-  // Fix 1: Coalesce concurrent cache misses into one upstream call.
-  if (inFlight.has(SHILLER_CACHE_KEY)) {
-    inFlight.get(SHILLER_CACHE_KEY).then(({ body, statusCode }) => {
-      res.writeHead(statusCode, {
-        "Content-Type": "application/json",
-        "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
-        ...securityHeaders,
-      });
-      res.end(body);
-    }).catch(() => {
-      if (!res.headersSent) {
-        res.writeHead(502, { "Content-Type": "text/plain", ...securityHeaders });
-        res.end("Upstream error");
-      }
-    });
+  if (inFlightRequests.has(SHILLER_CACHE_KEY)) {
+    inFlightRequests.get(SHILLER_CACHE_KEY)
+      .then(({ body, statusCode }) => sendJsonResponse(res, statusCode, body, securityHeaders))
+      .catch((err) => sendUpstreamErrorResponse(res, err, securityHeaders));
     return;
   }
 
-  const fetchPromise = new Promise((resolve, reject) => {
-    // Fix 2: Apply the same 8-second timeout pattern used for FRED.
-    const shillerReq = https.get(SHILLER_URL, (upstream) => {
-      const chunks = [];
-      upstream.on("data", (chunk) => chunks.push(chunk));
-      upstream.on("end", () => {
-        const body = Buffer.concat(chunks);
-        storeInCache(SHILLER_CACHE_KEY, body, upstream.statusCode, ONE_DAY_MS);
-        resolve({ body, statusCode: upstream.statusCode });
-      });
-    });
-
-    shillerReq.setTimeout(8000, () => {
-      shillerReq.destroy();
-      reject(new Error("Gateway Timeout"));
-    });
-
-    shillerReq.on("error", (err) => {
-      if (err.code !== "ECONNRESET") console.error("Shiller proxy error:", err);
-      reject(err);
-    });
-  });
-
-  inFlight.set(SHILLER_CACHE_KEY, fetchPromise);
-  fetchPromise.finally(() => inFlight.delete(SHILLER_CACHE_KEY));
-
-  fetchPromise.then(({ body, statusCode }) => {
-    res.writeHead(statusCode, {
-      "Content-Type": "application/json",
-      "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
-      ...securityHeaders,
-    });
-    res.end(body);
-  }).catch((err) => {
-    if (!res.headersSent) {
-      const isTimeout = err.message === "Gateway Timeout";
-      res.writeHead(isTimeout ? 504 : 502, { "Content-Type": "text/plain", ...securityHeaders });
-      res.end(isTimeout ? "Gateway Timeout" : "Upstream error");
-    }
-  });
+  fetchUpstream(SHILLER_DATA_URL, SHILLER_CACHE_KEY, ONE_DAY_MS)
+    .then(({ body, statusCode }) => sendJsonResponse(res, statusCode, body, securityHeaders))
+    .catch((err) => sendUpstreamErrorResponse(res, err, securityHeaders));
 }
 
-function staticCacheHeaders(isHtml) {
-  // Fix 7: index.html must always revalidate; other assets are content-addressed and immutable.
-  if (isHtml) return { "Cache-Control": "no-cache" };
-  return { "Cache-Control": "public, max-age=31536000, immutable" };
-}
-
-function handleStaticFile(req, res, securityHeaders) {
-  const targetPath = resolveFile(req.url || "/");
+function handleStaticFileRequest(req, res, securityHeaders) {
+  const targetPath = resolveStaticFilePath(req.url || "/");
   if (!targetPath) {
     res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8", ...securityHeaders });
     res.end("Forbidden");
@@ -404,23 +380,23 @@ function handleStaticFile(req, res, securityHeaders) {
       return;
     }
 
-    const ext = path.extname(targetPath).toLowerCase();
-    const contentType = contentTypes[ext] || "application/octet-stream";
-    const isHtml = ext === ".html";
+    const extension  = path.extname(targetPath).toLowerCase();
+    const contentType = CONTENT_TYPE_BY_EXTENSION[extension] || "application/octet-stream";
+    const isHtmlFile  = extension === ".html";
 
-    // Fix 7: Derive a lightweight ETag from the file's last-modified time.
+    // Lightweight ETag derived from last-modified time. Lets browsers skip
+    // downloading unchanged files without needing a full content hash.
     const etag = `"${stats.mtime.getTime().toString(16)}"`;
-    const ifNoneMatch = req.headers["if-none-match"];
-    if (ifNoneMatch === etag) {
-      res.writeHead(304, { ETag: etag, ...staticCacheHeaders(isHtml), ...securityHeaders });
+    if (req.headers["if-none-match"] === etag) {
+      res.writeHead(304, { ETag: etag, ...staticCacheHeaders(isHtmlFile), ...securityHeaders });
       res.end();
       return;
     }
 
-    const stream = fs.createReadStream(targetPath);
+    const fileStream = fs.createReadStream(targetPath);
 
-    // Fix 3: Handle stream errors before piping to avoid unhandled error events.
-    stream.on("error", (streamErr) => {
+    // Attach the error handler before piping to guarantee it's caught.
+    fileStream.on("error", (streamErr) => {
       console.error("Static file stream error:", streamErr);
       if (!res.headersSent) {
         res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8", ...securityHeaders });
@@ -431,10 +407,10 @@ function handleStaticFile(req, res, securityHeaders) {
     res.writeHead(200, {
       "Content-Type": contentType,
       ETag: etag,
-      ...staticCacheHeaders(isHtml),
+      ...staticCacheHeaders(isHtmlFile),
       ...securityHeaders,
     });
-    stream.pipe(res);
+    fileStream.pipe(res);
   });
 }
 
@@ -442,7 +418,8 @@ function handleStaticFile(req, res, securityHeaders) {
 
 const requestHandler = (req, res) => {
   const parsedUrl = new URL(req.url || "/", `https://localhost:${port}`);
-  // Fix 8: Skip per-request logging in production to avoid log noise and I/O overhead.
+
+  // Skip per-request logging in production to avoid log noise.
   if (process.env.NODE_ENV !== "production") {
     console.log(`${req.method} ${parsedUrl.pathname}`);
   }
@@ -463,13 +440,12 @@ const requestHandler = (req, res) => {
     "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
   };
 
-  // ── Canonical host redirect ───────────────────────────────────────────────
-  // In production, redirect www → non-www (or adjust to match your preferred canonical).
+  // In production, redirect www → non-www (or adjust to match the preferred canonical host).
   if (process.env.NODE_ENV === "production" && process.env.CANONICAL_HOST) {
     const host = (req.headers["x-forwarded-host"] || req.headers["host"] || "").toLowerCase();
     if (host && host !== process.env.CANONICAL_HOST) {
-      const target = `https://${process.env.CANONICAL_HOST}${req.url || "/"}`;
-      res.writeHead(301, { Location: target, ...securityHeaders });
+      const redirectTarget = `https://${process.env.CANONICAL_HOST}${req.url || "/"}`;
+      res.writeHead(301, { Location: redirectTarget, ...securityHeaders });
       res.end();
       return;
     }
@@ -485,7 +461,7 @@ const requestHandler = (req, res) => {
     return;
   }
 
-  handleStaticFile(req, res, securityHeaders);
+  handleStaticFileRequest(req, res, securityHeaders);
 };
 
 const server = tlsOptions

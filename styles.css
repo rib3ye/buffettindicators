@@ -1,33 +1,43 @@
+/* ── Design tokens ──────────────────────────────────────────────────────────── */
 :root {
-  --bg:           #06070D;
-  --surface:      #0A0C14;
-  --surface-2:    #0E1018;
-  --border:       #14172200;
-  --border-vis:   #14172290;
-  --border-2:     #222638;
-  --text:         #EAE5DA;
-  --text-mid:     #9895A4;
-  --text-dim:     #6A6878;
-  --amber:        #C8902A;
-  --amber-bright: #E6A634;
-  --green:        #27B87A;
-  --cobalt:       #4192F2;
-  --crimson:      #D63E3E;
+  /* Background layers — darker as you go deeper */
+  --color-background:         #06070D;
+  --color-surface:            #0A0C14;
+  --color-surface-raised:     #0E1018;
+
+  /* Border tones */
+  --color-border-transparent: #14172200; /* invisible — used only for axis lines */
+  --color-border-subtle:      #14172290; /* very faint visible border */
+  --color-border-strong:      #222638;   /* standard card/divider border */
+
+  /* Text tones */
+  --color-text:               #EAE5DA;   /* primary readable text */
+  --color-text-secondary:     #9895A4;   /* labels, subtext */
+  --color-text-muted:         #6A6878;   /* footnotes, disabled states */
+
+  /* Brand + signal colors */
+  --color-amber:              #C8902A;   /* primary accent / overvalued signal */
+  --color-amber-bright:       #E6A634;   /* hover / high-emphasis overvalued */
+  --color-green:              #27B87A;   /* fair value / live indicator */
+  --color-cobalt:             #4192F2;   /* undervalued signal */
+  --color-crimson:            #D63E3E;   /* error / warning */
 }
 
+/* ── Reset ──────────────────────────────────────────────────────────────────── */
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
+/* ── Base ───────────────────────────────────────────────────────────────────── */
 html { font-size: 16px; scroll-behavior: smooth; }
 
 body {
   font-family: 'DM Sans', -apple-system, sans-serif;
-  background: var(--bg);
-  color: var(--text);
+  background: var(--color-background);
+  color: var(--color-text);
   min-height: 100vh;
   overflow-x: hidden;
 }
 
-/* dot-grid atmosphere */
+/* Subtle dot-grid texture overlaid on the full page background */
 body::before {
   content: '';
   position: fixed;
@@ -39,7 +49,7 @@ body::before {
   z-index: 0;
 }
 
-/* film grain */
+/* Film-grain texture applied on top of the dot grid */
 body::after {
   content: '';
   position: fixed;
@@ -51,7 +61,7 @@ body::after {
   mix-blend-mode: screen;
 }
 
-/* ── HERO ───────────────────────────────── */
+/* ── Hero ───────────────────────────────────────────────────────────────────── */
 .hero {
   padding: 80px 52px 40px;
   max-width: 1400px;
@@ -68,7 +78,7 @@ body::after {
   font-size: 11px;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--text-mid);
+  color: var(--color-text-secondary);
   margin-bottom: 22px;
 }
 
@@ -76,15 +86,15 @@ body::after {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--green);
-  box-shadow: 0 0 10px var(--green);
+  background: var(--color-green);
+  box-shadow: 0 0 10px var(--color-green);
   animation: livepulse 2.8s ease-in-out infinite;
   flex-shrink: 0;
 }
 
 @keyframes livepulse {
-  0%, 100% { opacity: 1;   box-shadow: 0 0 10px var(--green); }
-  50%       { opacity: 0.4; box-shadow: 0 0 3px  var(--green); }
+  0%, 100% { opacity: 1;   box-shadow: 0 0 10px var(--color-green); }
+  50%       { opacity: 0.4; box-shadow: 0 0 3px  var(--color-green); }
 }
 
 .hero-title {
@@ -93,26 +103,26 @@ body::after {
   font-weight: 600;
   line-height: 0.9;
   letter-spacing: -0.02em;
-  color: var(--text);
+  color: var(--color-text);
   margin-bottom: 28px;
 }
 
 .hero-title em {
   font-style: italic;
-  color: var(--amber);
+  color: var(--color-amber);
 }
 
 .hero-rule {
   width: 48px;
   height: 1px;
-  background: var(--amber);
+  background: var(--color-amber);
   margin-bottom: 20px;
   opacity: 0.8;
 }
 
 .hero-desc {
   font-size: 14px;
-  color: var(--text-mid);
+  color: var(--color-text-secondary);
   line-height: 1.65;
   max-width: 520px;
   margin-bottom: 10px;
@@ -121,11 +131,11 @@ body::after {
 .hero-formula {
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
-  color: var(--text-mid);
+  color: var(--color-text-secondary);
   letter-spacing: 0.04em;
 }
 
-/* ── STATS BAR ──────────────────────────── */
+/* ── Stats bar ──────────────────────────────────────────────────────────────── */
 .stats-bar {
   display: flex;
   gap: 12px;
@@ -138,9 +148,9 @@ body::after {
 }
 
 .stat {
-  background: var(--surface);
-  border: 1px solid var(--border-vis);
-  border-left: 2px solid var(--border-2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-left: 2px solid var(--color-border-strong);
   padding: 22px 28px 18px;
   flex: 1;
   min-width: 170px;
@@ -153,7 +163,7 @@ body::after {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.12em;
-  color: var(--text-mid);
+  color: var(--color-text-secondary);
   margin-bottom: 12px;
 }
 
@@ -161,25 +171,26 @@ body::after {
   font-family: 'JetBrains Mono', monospace;
   font-size: 34px;
   font-weight: 400;
-  color: var(--text);
+  color: var(--color-text);
   line-height: 1;
   letter-spacing: -0.03em;
   transition: color 0.4s ease;
 }
 
-.stat-value.overvalued  { color: var(--amber-bright); }
-.stat-value.fair        { color: var(--green); }
-.stat-value.undervalued { color: var(--cobalt); }
+/* Valuation signal classes — applied dynamically by JavaScript */
+.stat-value.overvalued  { color: var(--color-amber-bright); }
+.stat-value.fair        { color: var(--color-green); }
+.stat-value.undervalued { color: var(--color-cobalt); }
 
 .stat-sub {
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
-  color: var(--text-mid);
+  color: var(--color-text-secondary);
   margin-top: 9px;
   letter-spacing: 0.02em;
 }
 
-/* ── CHART CONTAINERS ───────────────────── */
+/* ── Chart area ─────────────────────────────────────────────────────────────── */
 .chart-container {
   padding: 0 52px 88px;
   max-width: 1400px;
@@ -189,8 +200,8 @@ body::after {
 }
 
 .chart-wrapper {
-  background: var(--surface);
-  border: 1px solid var(--border-vis);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
   border-radius: 2px;
   padding: 28px 28px 18px;
   position: relative;
@@ -203,7 +214,7 @@ body::after {
 
 .canvas-area canvas { width: 100% !important; }
 
-/* ── LEGEND ─────────────────────────────── */
+/* ── Chart legend ───────────────────────────────────────────────────────────── */
 .legend-custom {
   display: flex;
   gap: 18px;
@@ -218,14 +229,14 @@ body::after {
   gap: 8px;
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
-  color: var(--text-mid);
+  color: var(--color-text-secondary);
   cursor: pointer;
   user-select: none;
   letter-spacing: 0.03em;
   transition: color 0.15s;
 }
 
-.legend-item:hover { color: var(--text); }
+.legend-item:hover { color: var(--color-text); }
 
 .legend-swatch {
   width: 18px;
@@ -234,11 +245,12 @@ body::after {
   flex-shrink: 0;
 }
 
+/* Dashed swatches use a CSS custom property set inline via JS */
 .legend-swatch.dashed {
   background: repeating-linear-gradient(90deg, var(--color) 0, var(--color) 4px, transparent 4px, transparent 8px);
 }
 
-/* ── LOADING ────────────────────────────── */
+/* ── Loading & error states ─────────────────────────────────────────────────── */
 .loading {
   display: flex;
   align-items: center;
@@ -246,7 +258,7 @@ body::after {
   height: 400px;
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
-  color: var(--text-mid);
+  color: var(--color-text-secondary);
   letter-spacing: 0.08em;
   gap: 14px;
 }
@@ -254,8 +266,8 @@ body::after {
 .loading .spinner {
   width: 16px;
   height: 16px;
-  border: 1.5px solid var(--border-2);
-  border-top-color: var(--amber);
+  border: 1.5px solid var(--color-border-strong);
+  border-top-color: var(--color-amber);
   border-radius: 50%;
   animation: spin 1s linear infinite;
   flex-shrink: 0;
@@ -264,7 +276,7 @@ body::after {
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .error {
-  color: var(--crimson);
+  color: var(--color-crimson);
   padding: 24px;
   text-align: center;
   font-family: 'JetBrains Mono', monospace;
@@ -272,7 +284,7 @@ body::after {
   letter-spacing: 0.06em;
 }
 
-/* ── CONTROLS ───────────────────────────── */
+/* ── Time-range controls ────────────────────────────────────────────────────── */
 .controls {
   display: flex;
   gap: 6px;
@@ -282,8 +294,8 @@ body::after {
 
 .controls button {
   background: transparent;
-  border: 1px solid var(--border-2);
-  color: var(--text-mid);
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-text-secondary);
   padding: 5px 16px;
   border-radius: 100px;
   cursor: pointer;
@@ -294,22 +306,22 @@ body::after {
 }
 
 .controls button:hover {
-  border-color: var(--text-mid);
-  color: var(--text-mid);
+  border-color: var(--color-text-secondary);
+  color: var(--color-text-secondary);
 }
 
 .controls button.active {
-  background: var(--amber);
-  border-color: var(--amber);
-  color: var(--bg);
+  background: var(--color-amber);
+  border-color: var(--color-amber);
+  color: var(--color-background);
   font-weight: 500;
 }
 
-/* ── FOOTER NOTES ───────────────────────── */
+/* ── Chart footnotes ────────────────────────────────────────────────────────── */
 .source-note {
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
-  color: var(--text-dim);
+  color: var(--color-text-muted);
   margin-top: 18px;
   padding-left: 2px;
   letter-spacing: 0.03em;
@@ -318,15 +330,15 @@ body::after {
 .tooltip-note {
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
-  color: var(--text-dim);
+  color: var(--color-text-muted);
   margin-top: 6px;
   padding-left: 2px;
   letter-spacing: 0.03em;
 }
 
-/* ── INDICATOR SECTIONS ─────────────────── */
+/* ── Indicator sections ─────────────────────────────────────────────────────── */
 .indicator-section {
-  border-top: 1px solid var(--border-vis);
+  border-top: 1px solid var(--color-border-subtle);
   position: relative;
   z-index: 2;
 }
@@ -346,7 +358,7 @@ body::after {
   font-size: 100px;
   font-weight: 600;
   line-height: 1;
-  color: var(--border-2);
+  color: var(--color-border-strong);
   letter-spacing: -0.04em;
   flex-shrink: 0;
   user-select: none;
@@ -361,7 +373,7 @@ body::after {
   font-family: 'Cormorant Garant', Georgia, serif;
   font-size: clamp(34px, 4vw, 52px);
   font-weight: 600;
-  color: var(--text);
+  color: var(--color-text);
   line-height: 1;
   letter-spacing: -0.015em;
   margin-bottom: 8px;
@@ -369,27 +381,27 @@ body::after {
 
 .section-text p {
   font-size: 13px;
-  color: var(--text-mid);
+  color: var(--color-text-secondary);
   margin-bottom: 6px;
 }
 
 .section-text .formula {
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
-  color: var(--text-mid);
+  color: var(--color-text-secondary);
   letter-spacing: 0.03em;
 }
 
 .section-blurb {
   font-size: 14px;
-  color: var(--text-mid);
+  color: var(--color-text-secondary);
   line-height: 1.7;
   max-width: 700px;
   margin-top: 20px;
   margin-bottom: 8px;
 }
 
-/* ── NOSCRIPT ───────────────────────────── */
+/* ── No-JavaScript fallback ─────────────────────────────────────────────────── */
 .noscript-notice {
   background: #0A0C14;
   border: 1px solid #222638;
@@ -402,9 +414,10 @@ body::after {
   padding: 32px 40px;
   text-align: center;
 }
+
 .noscript-notice strong { color: #EAE5DA; }
 
-/* ── RESPONSIVE ─────────────────────────── */
+/* ── Responsive — tablet (≤ 768px) ─────────────────────────────────────────── */
 @media (max-width: 768px) {
   .canvas-area {
     height: 300px !important;
@@ -487,6 +500,7 @@ body::after {
   }
 }
 
+/* ── Responsive — mobile (≤ 480px) ─────────────────────────────────────────── */
 @media (max-width: 480px) {
   .canvas-area {
     height: 260px !important;
