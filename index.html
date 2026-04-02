@@ -196,7 +196,7 @@
       </div>
       <div class="tooltip-note">Scroll to zoom, drag to pan</div>
       <div class="source-note">
-        Data: Federal Reserve Bank of St. Louis (FRED) &mdash; Total US Equity Market Cap / Fed Z.1 Flow of Funds (NCBEILQ027S) &amp; GDP (GDP).
+        Data: Federal Reserve Bank of St. Louis (FRED) &mdash; Wilshire 5000 Full Cap Index (WILL5000INDFC) &amp; GDP (GDP).
       </div>
     </div>
   </div>
@@ -406,13 +406,15 @@
 
     async function fetchBuffettData(prefetchedGdpData) {
       try {
-        // NCBEILQ027S: Total US equity market cap in millions USD (Fed Z.1 Flow of Funds).
-        // GDP is in billions SAAR — convert market cap to billions by dividing by 1000.
+        // WILL5000INDFC: Wilshire 5000 Full Cap index. The index level approximates
+        // total US equity market cap in billions of dollars, so it can be divided
+        // directly by GDP (also in billions) to get the Buffett Indicator ratio.
+        // Starts 1971 — consistent methodology throughout, no pre-1999 discontinuity.
         const fetchGdp = prefetchedGdpData
           ? Promise.resolve(prefetchedGdpData)
           : fetchFredSeries('GDP', '1945-01-01');
         const [marketCapData, gdpData] = await Promise.all([
-          fetchFredSeries('NCBEILQ027S', '1945-01-01'),
+          fetchFredSeries('WILL5000INDFC', '1971-01-01'),
           fetchGdp,
         ]);
 
@@ -425,7 +427,7 @@
         for (const dataPoint of marketCapData) {
           const gdpValue = gdpByQuarter.get(toQuarterKey(dataPoint.date));
           if (gdpValue && gdpValue > 0) {
-            ratioData.push({ date: dataPoint.date, ratio: (dataPoint.value / 1000 / gdpValue) * 100 });
+            ratioData.push({ date: dataPoint.date, ratio: (dataPoint.value / gdpValue) * 100 });
           }
         }
         return { ratioData, usedFallbackSeries: false };
@@ -747,7 +749,7 @@
 
         if (usedFallbackSeries) {
           document.querySelector('.source-note').textContent =
-            'Data: Federal Reserve Bank of St. Louis (FRED) \u2014 Stock Market Capitalization to GDP for United States (DDDM01USA156NWDB).';
+            'Data: Federal Reserve Bank of St. Louis (FRED) \u2014 Stock Market Capitalization to GDP for United States (DDDM01USA156NWDB). Fallback series \u2014 primary data unavailable.';
         }
 
         const trend                              = computeBuffettTrend(ratioData);
