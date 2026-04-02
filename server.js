@@ -1,8 +1,9 @@
-const http  = require("http");
-const https = require("https");
-const fs    = require("fs");
-const path  = require("path");
-const { URL } = require("url");
+const http     = require("http");
+const https    = require("https");
+const fs       = require("fs");
+const path     = require("path");
+const { URL }  = require("url");
+const Database = require("better-sqlite3");
 
 // ── Environment ───────────────────────────────────────────────────────────────
 // Load .env.local first, then .env. Earlier files win — variables already set
@@ -79,21 +80,56 @@ function getTtlForSeries(seriesId) {
   return SERIES_TTL_OVERRIDES[seriesId] ?? SIX_HOURS_MS;
 }
 
-// ── In-memory cache ───────────────────────────────────────────────────────────
-// A simple Map with TTL-based expiry. Capped at CACHE_MAX_ENTRIES to prevent
-// unbounded growth. When the cap is hit, the oldest entry is evicted (Map
-// preserves insertion order, so .keys().next().value is always the oldest).
+// ── Cache ─────────────────────────────────────────────────────────────────────
+// Two-layer cache: a fast in-memory Map (L1) backed by a SQLite database (L2).
 //
-// Each entry shape: { body: Buffer, statusCode: number, storedAt: number, ttlMs: number }
+// Reads always come from the in-memory Map — no disk I/O on the hot path.
+// Writes go to both layers immediately, so the database is always up to date.
+// On startup the Map is populated from the database, giving persistence across
+// both process restarts and new Railway deploys (when a Volume is mounted).
 //
-// The cache is also written to disk on shutdown and reloaded on startup so that
-// a process restart (crash, scale-to-zero) doesn't force a cold fetch of every
-// series. Note: Railway replaces the container on deploy, so disk persistence
-// only helps with restarts within the same deployment, not across deploys.
+// The database file lives in CACHE_DIR, which should be set to the Railway
+// Volume mount path (e.g. /data) in production. Falls back to the project
+// directory for local development.
+//
+// Each cache entry: { body: Buffer, statusCode: number, storedAt: number, ttlMs: number }
 
 const CACHE_MAX_ENTRIES = 200;
-const CACHE_FILE = path.join(__dirname, ".cache.json");
+
+const CACHE_DIR = process.env.CACHE_DIR || __dirname;
+const db = new Database(path.join(CACHE_DIR, "cache.db"));
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS cache (
+    key          TEXT    PRIMARY KEY,
+    body         BLOB    NOT NULL,
+    status_code  INTEGER NOT NULL,
+    stored_at    INTEGER NOT NULL,
+    ttl_ms       INTEGER NOT NULL
+  )
+`);
+
+const dbUpsert = db.prepare(
+  "INSERT OR REPLACE INTO cache (key, body, status_code, stored_at, ttl_ms) VALUES (?, ?, ?, ?, ?)"
+);
+const dbDelete = db.prepare("DELETE FROM cache WHERE key = ?");
+
 const cache = new Map();
+
+// Populate the in-memory Map from the database on startup.
+// Skips non-200 entries so we never resurrect a cached error response.
+function loadCacheFromDatabase() {
+  const rows = db.prepare("SELECT * FROM cache WHERE status_code = 200").all();
+  for (const row of rows) {
+    cache.set(row.key, {
+      body:       row.body,         // better-sqlite3 returns BLOBs as Buffers
+      statusCode: row.status_code,
+      storedAt:   row.stored_at,
+      ttlMs:      row.ttl_ms,
+    });
+  }
+  if (cache.size > 0) console.log(`Cache loaded: ${cache.size} entries restored from database`);
+}
 
 function buildCacheKey(seriesId, observationStart, frequency) {
   return `${seriesId}|${observationStart ?? ""}|${frequency ?? ""}`;
@@ -110,39 +146,11 @@ function storeInCache(key, body, statusCode, ttlMs) {
   if (cache.size >= CACHE_MAX_ENTRIES && !cache.has(key)) {
     const oldestKey = cache.keys().next().value;
     cache.delete(oldestKey);
+    dbDelete.run(oldestKey);
   }
-  cache.set(key, { body, statusCode, storedAt: Date.now(), ttlMs });
-}
-
-// Serialize the cache to disk. Buffer bodies are stored as base64 strings.
-// Called synchronously from the shutdown handler so nothing is lost on exit.
-function saveCacheToDisk() {
-  try {
-    const entries = [...cache.entries()].map(([key, entry]) => [
-      key,
-      { ...entry, body: entry.body.toString("base64") },
-    ]);
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(entries));
-    console.log(`Cache saved: ${entries.length} entries written to ${CACHE_FILE}`);
-  } catch (err) {
-    console.error("Failed to save cache to disk:", err);
-  }
-}
-
-// Deserialize the cache from disk on startup. Skips entries with non-200
-// status codes so we never resurrect a cached error response.
-function loadCacheFromDisk() {
-  try {
-    const entries = JSON.parse(fs.readFileSync(CACHE_FILE, "utf8"));
-    for (const [key, entry] of entries) {
-      if (entry.statusCode === 200) {
-        cache.set(key, { ...entry, body: Buffer.from(entry.body, "base64") });
-      }
-    }
-    console.log(`Cache loaded: ${cache.size} entries restored from ${CACHE_FILE}`);
-  } catch {
-    // No cache file yet — start fresh.
-  }
+  const storedAt = Date.now();
+  cache.set(key, { body, statusCode, storedAt, ttlMs });
+  dbUpsert.run(key, body, statusCode, storedAt, ttlMs);
 }
 
 // ── In-flight request coalescing ──────────────────────────────────────────────
@@ -514,7 +522,7 @@ const requestHandler = (req, res) => {
   handleStaticFileRequest(req, res, securityHeaders);
 };
 
-loadCacheFromDisk();
+loadCacheFromDatabase();
 
 const server = tlsOptions
   ? https.createServer(tlsOptions, requestHandler)
@@ -522,10 +530,10 @@ const server = tlsOptions
 
 server.on("error", (err) => { console.error("Server error:", err); });
 
-// Save cache on shutdown. Railway sends SIGTERM before killing the process;
-// SIGINT handles Ctrl-C in local development.
+// Close the database cleanly on shutdown so SQLite's WAL is fully checkpointed.
+// Railway sends SIGTERM before killing the process; SIGINT handles Ctrl-C locally.
 function shutdown() {
-  saveCacheToDisk();
+  db.close();
   server.close(() => process.exit(0));
 }
 process.on("SIGTERM", shutdown);

@@ -1,6 +1,8 @@
 .env
 .env.local
-.cache.json
+*.db
+*.db-shm
+*.db-wal
 *.pem
 .claude/
 .cursor/
