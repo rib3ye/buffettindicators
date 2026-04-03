@@ -40,21 +40,21 @@
 ### Priority 1: Critical (do these first)
 
 **1. Create the OG image (`/og-image.png`, 1200x630)**
-The OG/Twitter tags reference `https://buffettindex.info/og-image.png`. Without it, social shares show a blank card, destroying click-through rates from Twitter, LinkedIn, and Reddit. This is the single highest-ROI remaining item.
+The OG/Twitter tags reference `https://buffettindicators.com/og-image.png`. Without it, social shares show a blank card, destroying click-through rates from Twitter, LinkedIn, and Reddit. This is the single highest-ROI remaining item.
 
 Recommended design: dark `#06070D` background, "BuffettIndex" in large Cormorant typeface, amber accent, four gauge names listed, tagline "Live US Market Valuation". Export at 1200x630.
 
 **2. Deploy `robots.txt` and `sitemap.xml` to production**
-Both files now exist in the repo. Verify they are accessible at `https://buffettindex.info/robots.txt` and `https://buffettindex.info/sitemap.xml` after the next deploy. Then submit the sitemap URL in Google Search Console.
+Both files now exist in the repo. Verify they are accessible at `https://buffettindicators.com/robots.txt` and `https://buffettindicators.com/sitemap.xml` after the next deploy. Then submit the sitemap URL in Google Search Console.
 
 **3. Google Search Console setup**
-- Verify ownership of `buffettindex.info`
+- Verify ownership of `buffettindicators.com`
 - Submit sitemap
 - Monitor for indexing errors and Core Web Vitals
 - Watch for rich result eligibility (FAQ schema)
 
 **4. Set `CANONICAL_HOST` environment variable in Railway**
-The server now supports a 301 redirect from any non-canonical hostname. In the Railway dashboard, set `CANONICAL_HOST=buffettindex.info` (or whichever is the preferred canonical domain — no `www` prefix unless that's the preferred form). This prevents duplicate indexing if the site is accessible under multiple hostnames.
+The server now supports a 301 redirect from any non-canonical hostname. In the Railway dashboard, set `CANONICAL_HOST=buffettindicators.com` (or whichever is the preferred canonical domain — no `www` prefix unless that's the preferred form). This prevents duplicate indexing if the site is accessible under multiple hostnames.
 
 ---
 
