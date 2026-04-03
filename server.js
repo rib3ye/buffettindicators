@@ -56,7 +56,7 @@ try {
 const ALLOWED_FRED_SERIES = new Set([
   "WILL5000INDFC", "GDP", "GDPA", "DDDM01USA156NWDB",
   "GS10", "CPIAUCSL", "UNRATE", "FEDFUNDS",
-  "SP500", "CP",
+  "NCBEILQ027S", "SP500", "CP",
 ]);
 
 // ── Cache TTLs ────────────────────────────────────────────────────────────────
