@@ -1,6 +1,6 @@
 # BuffettIndex
 
-A single-page dashboard that tracks four independent gauges of US stock market valuation, updated continuously from primary sources. No frameworks, no build step — a Node.js server proxies FRED API calls to keep the API key server-side, serves static files, and caches responses in memory.
+A single-page dashboard that tracks four independent gauges of US stock market valuation, updated continuously from primary sources. No frontend framework, no build step — a Node.js server proxies FRED API calls to keep the API key server-side, serves static files, and caches responses in SQLite.
 
 ---
 
@@ -8,7 +8,7 @@ A single-page dashboard that tracks four independent gauges of US stock market v
 
 | Gauge | What it measures |
 |---|---|
-| **Buffett Indicator** | Wilshire 5000 total market cap as a percentage of GDP. Buffett's preferred single measure of aggregate market valuation. |
+| **Buffett Indicator** | Total US equity market cap (Fed Z.1 Flow of Funds) as a percentage of GDP. Buffett's preferred single measure of aggregate market valuation. |
 | **Shiller CAPE** | Cyclically Adjusted P/E ratio — price divided by the 10-year average of inflation-adjusted earnings. Developed by Nobel laureate Robert Shiller. |
 | **Fed Model** | Earnings yield (inverse of CAPE) versus the 10-year Treasury yield. Measures the relative attractiveness of equities vs. bonds. |
 | **Corporate Profits / GDP** | After-tax corporate profits as a share of GDP. Profit margins are mean-reverting; this tracks how far the current cycle has stretched them. |
@@ -19,7 +19,7 @@ A single-page dashboard that tracks four independent gauges of US stock market v
 
 ### Prerequisites
 
-- Node.js 18+ (no npm dependencies — the server uses only Node built-ins)
+- Node.js 22+
 - A FRED API key (free, takes 30 seconds)
 
 ### Get a FRED API key
@@ -38,11 +38,10 @@ cp .env.example .env.local
 
 The server loads `.env.local` first, then `.env`. Values in earlier files are never overwritten, so `.env.local` is safe for local secrets.
 
-### Run
+### Install and run
 
 ```bash
-node server.js
-# or
+npm install
 npm start
 ```
 
@@ -61,25 +60,29 @@ Without the certificates the server falls back to plain HTTP — fine for local 
 ## Architecture
 
 ```
-Browser  →  GET /api/fred?series_id=WILL5000INDFC  →  Node server
-                                                         │
-                                              cache hit? ─┤
-                                                         │ miss
-                                                         ↓
-                                              FRED API (api.stlouisfed.org)
-                                              API key injected server-side
+Browser  →  GET /api/fred?series_id=NCBEILQ027S  →  Node server
+                                                       │
+                                            SQLite cache hit? ─┤
+                                                       │ miss
+                                                       ↓
+                                            FRED API (api.stlouisfed.org)
+                                            API key injected server-side
 ```
 
 **Why a Node proxy instead of calling FRED directly from the browser?**
 FRED requires an API key. Putting a key in client-side JS exposes it to anyone who opens DevTools. The proxy keeps the key in the server process environment, validates every request against an allowlist of permitted series IDs, and never forwards it to the client.
 
-**In-memory cache.** Responses from FRED and the Shiller data source are cached in a `Map` keyed by `seriesId|observation_start|frequency`. TTLs vary by series — SP500 data expires after 1 hour, GDP and other quarterly series after 24 hours, everything else after 6 hours. The cache is capped at 200 entries (LRU eviction on the oldest key). There is no persistence; the cache resets on restart.
+**Two-layer cache.** Responses from FRED and the Shiller data source are stored in both an in-memory `Map` (fast reads) and a SQLite database (persistence). Reads always come from memory — no disk I/O on the hot path. Writes go to both layers immediately, so the database is always current. On startup the Map is populated from SQLite, giving a warm cache from the very first request after a deploy or restart.
+
+Cache TTLs vary by series: SP500 expires after 1 hour, GDP and other quarterly series after 24 hours, everything else after 6 hours. The in-memory cache is capped at 200 entries (LRU eviction). The SQLite database is cleaned via the same LRU eviction path.
+
+**Stale-on-error.** If a FRED upstream fetch fails (timeout, outage), the server falls back to the most recent cached response for that series regardless of its TTL — so users never see a broken page due to a temporary FRED outage. Entries with non-200 status codes are never served as stale.
 
 **Request coalescing.** If multiple requests arrive for the same cache key while an upstream fetch is in flight, they all wait on the same `Promise` rather than triggering duplicate FRED calls.
 
 **Rate limiting.** 10 requests per IP per minute, 80 requests globally per minute, enforced with a sliding window. Stale per-IP windows are pruned every 5 minutes.
 
-**Static files.** `index.html` is served with `Cache-Control: no-cache` so browsers always revalidate. All other assets get `max-age=31536000, immutable`. ETags are derived from `mtime`.
+**Static files.** `index.html` is served with `Cache-Control: no-cache` so browsers always revalidate. All other assets (including `styles.css`) get `max-age=31536000, immutable`. ETags are derived from `mtime`.
 
 ---
 
@@ -88,9 +91,16 @@ FRED requires an API key. Putting a key in client-side JS exposes it to anyone w
 1. Create a new Railway project and connect the repo.
 2. Set the `FRED_API_KEY` environment variable in the Railway dashboard.
 3. Optionally set `PORT` (Railway injects this automatically) and `NODE_ENV=production`.
-4. Deploy. Railway terminates TLS at the edge — the Node process runs plain HTTP behind it, which is correct. The server suppresses the TLS-not-found warning when `NODE_ENV=production`.
+4. Deploy. Railway terminates TLS at the edge — the Node process runs plain HTTP behind it. The server suppresses the TLS-not-found warning when `NODE_ENV=production`.
 
-No build step. The start command is `node server.js`.
+**Persistent cache (recommended).** Without extra configuration, `cache.db` lives inside the container and is wiped on every new deploy. To survive deploys:
+
+1. Create a Railway Volume and mount it at `/data`.
+2. Set the `CACHE_DIR=/data` environment variable on the service.
+
+The server will create `cache.db` inside `CACHE_DIR` on first boot, and reload it on every subsequent start. All writes happen immediately — no data is lost if the process is killed hard.
+
+No build step. The start command is `node server.js` (via `npm start`).
 
 ---
 
@@ -98,5 +108,5 @@ No build step. The start command is `node server.js`.
 
 | Source | Series / Endpoint |
 |---|---|
-| [FRED (St. Louis Fed)](https://fred.stlouisfed.org) | `WILL5000INDFC` (Wilshire 5000), `GDP`, `GDPA`, `SP500`, `GS10` (10-yr Treasury), `CPIAUCSL` (CPI), `FEDFUNDS`, `NCBEILQ027S` (corporate profits), `CP`, `DDDM01USA156NWDB` (market cap / GDP ratio) |
+| [FRED (St. Louis Fed)](https://fred.stlouisfed.org) | `NCBEILQ027S` (total equity market cap, Fed Z.1), `GDP`, `GDPA`, `SP500`, `GS10` (10-yr Treasury), `CPIAUCSL` (CPI), `FEDFUNDS`, `CP` (corporate profits), `DDDM01USA156NWDB` (market cap / GDP fallback) |
 | [Shiller Data (via posix4e GitHub mirror)](https://posix4e.github.io/shiller_wrapper_data/data/stock_market_data.json) | CAPE ratio historical series |
