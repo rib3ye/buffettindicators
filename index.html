@@ -133,12 +133,28 @@
 </head>
 <body>
   <header class="hero">
-    <div class="hero-eyebrow"><span class="live-dot" aria-hidden="true"></span>Live Market Data</div>
-    <h1 class="hero-title">Buffett<br><em>Index</em></h1>
+    <h1 class="hero-title">What Would<br><em>Buffett Do?</em></h1>
     <div class="hero-rule" aria-hidden="true"></div>
     <p class="hero-desc">Four independent gauges of US market valuation — updated continuously from primary sources.</p>
     <p class="hero-formula">Market Cap / GDP &nbsp;·&nbsp; Shiller CAPE &nbsp;·&nbsp; Fed Model &nbsp;·&nbsp; Corp. Margins</p>
   </header>
+
+  <nav class="side-nav" aria-label="Section navigation">
+    <div class="side-nav-track">
+      <a href="#buffett-indicator" class="side-nav-link active" data-section="buffett-indicator">
+        <span class="side-nav-label">Buffett</span>
+      </a>
+      <a href="#shiller-cape" class="side-nav-link" data-section="shiller-cape">
+        <span class="side-nav-label">CAPE</span>
+      </a>
+      <a href="#fed-model" class="side-nav-link" data-section="fed-model">
+        <span class="side-nav-label">Fed Model</span>
+      </a>
+      <a href="#corporate-profits" class="side-nav-link" data-section="corporate-profits">
+        <span class="side-nav-label">Profits</span>
+      </a>
+    </div>
+  </nav>
 
   <main id="main-content">
 
@@ -1233,6 +1249,41 @@
       BuffettIndex is an independent research tool. Nothing on this site constitutes investment advice.
     </p>
   </footer>
+
+  <script>
+  // ── Side-nav scroll spy ───────────────────────────────────────────────────
+  (() => {
+    const nav = document.querySelector('.side-nav');
+    const links = document.querySelectorAll('.side-nav-link');
+    const sectionIds = Array.from(links).map(l => l.dataset.section);
+    const sections = sectionIds.map(id => document.getElementById(id));
+
+    // Show nav only after scrolling past the hero
+    const hero = document.querySelector('.hero');
+    let navVisible = false;
+
+    const updateActive = () => {
+      const scrollY = window.scrollY + window.innerHeight * 0.35;
+      let current = sectionIds[0];
+      for (let i = 0; i < sections.length; i++) {
+        if (sections[i] && sections[i].offsetTop <= scrollY) current = sectionIds[i];
+      }
+      links.forEach(l => l.classList.toggle('active', l.dataset.section === current));
+    };
+
+    const updateVisibility = () => {
+      const pastHero = window.scrollY > (hero ? hero.offsetTop + hero.offsetHeight - 100 : 300);
+      if (pastHero !== navVisible) {
+        navVisible = pastHero;
+        nav.classList.toggle('visible', pastHero);
+      }
+    };
+
+    window.addEventListener('scroll', () => { updateActive(); updateVisibility(); }, { passive: true });
+    updateActive();
+    updateVisibility();
+  })();
+  </script>
 
   <!-- Cloudflare Web Analytics --><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "4f521527db8d42d9955d86a3167a7176"}'></script><!-- End Cloudflare Web Analytics -->
 </body>

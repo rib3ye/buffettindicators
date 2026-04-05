@@ -417,8 +417,121 @@ body::after {
 
 .noscript-notice strong { color: #EAE5DA; }
 
+/* ── Side navigation ───────────────────────────────────────────────────────── */
+.side-nav {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  padding-left: 16px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.5s cubic-bezier(0.19, 1, 0.22, 1);
+}
+
+.side-nav.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.side-nav-track {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  position: relative;
+  padding: 12px 0;
+}
+
+/* Vertical rail */
+.side-nav-track::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 20px;
+  bottom: 20px;
+  width: 1px;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    var(--color-border-strong) 15%,
+    var(--color-border-strong) 85%,
+    transparent
+  );
+}
+
+.side-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px 14px 0;
+  text-decoration: none;
+  position: relative;
+  cursor: pointer;
+}
+
+/* Pip on the rail — default state */
+.side-nav-link::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-border-strong);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 2;
+  transition: background 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+}
+
+.side-nav-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  transition: color 0.3s ease, transform 0.2s ease, opacity 0.2s ease;
+  opacity: 0;
+  transform: translateX(-6px);
+}
+
+.side-nav:hover .side-nav-label {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* Hover */
+.side-nav-link:hover::before {
+  background: var(--color-text-secondary);
+  transform: scale(1.3);
+}
+
+.side-nav-link:hover .side-nav-label {
+  color: var(--color-text-secondary);
+}
+
+/* Active — amber glow */
+.side-nav-link.active::before {
+  background: var(--color-amber);
+  box-shadow: 0 0 10px var(--color-amber), 0 0 3px var(--color-amber);
+  transform: scale(1.4);
+}
+
+.side-nav-link.active .side-nav-label {
+  color: var(--color-amber);
+  opacity: 1;
+  transform: translateX(0);
+}
+
 /* ── Responsive — tablet (≤ 768px) ─────────────────────────────────────────── */
 @media (max-width: 768px) {
+  .side-nav {
+    display: none;
+  }
+
   .canvas-area {
     height: 300px !important;
   }
