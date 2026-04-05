@@ -249,10 +249,12 @@ function resolveStaticFilePath(requestPath) {
   return absolutePath;
 }
 
-function staticCacheHeaders(isHtmlFile) {
+function staticCacheHeaders(ext) {
   // HTML must always revalidate so users get the latest version immediately.
-  // All other assets are content-addressed and can be cached indefinitely.
-  if (isHtmlFile) return { "Cache-Control": "no-cache" };
+  if (ext === ".html") return { "Cache-Control": "no-cache" };
+  // CSS and JS are not content-hashed, so use a short TTL with revalidation.
+  if (ext === ".css" || ext === ".js") return { "Cache-Control": "public, max-age=300, must-revalidate" };
+  // Images and other assets change rarely — cache for a long time.
   return { "Cache-Control": "public, max-age=31536000, immutable" };
 }
 
@@ -284,7 +286,10 @@ function fetchUpstream(url, cacheKey, ttlMs) {
       upstreamRes.on("data", (chunk) => chunks.push(chunk));
       upstreamRes.on("end", () => {
         const body = Buffer.concat(chunks);
-        storeInCache(cacheKey, body, upstreamRes.statusCode, ttlMs);
+        // Only cache successful responses — never overwrite good data with errors.
+        if (upstreamRes.statusCode >= 200 && upstreamRes.statusCode < 300) {
+          storeInCache(cacheKey, body, upstreamRes.statusCode, ttlMs);
+        }
         resolve({ body, statusCode: upstreamRes.statusCode });
       });
     });
@@ -384,7 +389,14 @@ function handleFredRequest(req, res, parsedUrl, securityHeaders) {
   const fredUrl = `https://api.stlouisfed.org/fred/series/observations?${fredParams.toString()}`;
 
   fetchUpstream(fredUrl, cacheKey, getTtlForSeries(seriesId))
-    .then(({ body, statusCode }) => sendJsonResponse(res, statusCode, body, securityHeaders))
+    .then(({ body, statusCode }) => {
+      // If upstream returned an error (e.g. 429) but we have stale good data, prefer the stale data.
+      if (statusCode >= 400 && cached && cached.statusCode === 200) {
+        sendJsonResponse(res, cached.statusCode, cached.body, securityHeaders);
+      } else {
+        sendJsonResponse(res, statusCode, body, securityHeaders);
+      }
+    })
     .catch(serveStaleOnFailure);
 }
 
@@ -420,7 +432,13 @@ function handleShillerRequest(req, res, securityHeaders) {
   }
 
   fetchUpstream(SHILLER_DATA_URL, SHILLER_CACHE_KEY, ONE_DAY_MS)
-    .then(({ body, statusCode }) => sendJsonResponse(res, statusCode, body, securityHeaders))
+    .then(({ body, statusCode }) => {
+      if (statusCode >= 400 && cached && cached.statusCode === 200) {
+        sendJsonResponse(res, cached.statusCode, cached.body, securityHeaders);
+      } else {
+        sendJsonResponse(res, statusCode, body, securityHeaders);
+      }
+    })
     .catch(serveStaleOnFailure);
 }
 
@@ -441,13 +459,12 @@ function handleStaticFileRequest(req, res, securityHeaders) {
 
     const extension  = path.extname(targetPath).toLowerCase();
     const contentType = CONTENT_TYPE_BY_EXTENSION[extension] || "application/octet-stream";
-    const isHtmlFile  = extension === ".html";
 
     // Lightweight ETag derived from last-modified time. Lets browsers skip
     // downloading unchanged files without needing a full content hash.
     const etag = `"${stats.mtime.getTime().toString(16)}"`;
     if (req.headers["if-none-match"] === etag) {
-      res.writeHead(304, { ETag: etag, ...staticCacheHeaders(isHtmlFile), ...securityHeaders });
+      res.writeHead(304, { ETag: etag, ...staticCacheHeaders(extension), ...securityHeaders });
       res.end();
       return;
     }
@@ -466,7 +483,7 @@ function handleStaticFileRequest(req, res, securityHeaders) {
     res.writeHead(200, {
       "Content-Type": contentType,
       ETag: etag,
-      ...staticCacheHeaders(isHtmlFile),
+      ...staticCacheHeaders(extension),
       ...securityHeaders,
     });
     fileStream.pipe(res);
