@@ -367,6 +367,7 @@
     const FRED_API_BASE  = '/api/fred';
     const MS_PER_YEAR    = 365.25 * 24 * 3600 * 1000;
     const MS_PER_DAY     = 24 * 3600 * 1000;
+    const IS_MOBILE      = window.matchMedia('(pointer: coarse)').matches;
 
     // Maps human-readable frequency names to FRED API frequency codes.
     const FREQUENCY_CODE_MAP = {
@@ -677,10 +678,11 @@
         options: {
           responsive: true,
           maintainAspectRatio: false,
-          interaction: { mode: 'index', intersect: false },
+          interaction: IS_MOBILE ? { mode: null } : { mode: 'index', intersect: false },
           plugins: {
             legend: { display: false },
             tooltip: {
+              enabled: !IS_MOBILE,
               backgroundColor: '#0A0C14', titleColor: '#E4DED3', bodyColor: '#5A5870',
               borderColor: '#222638', borderWidth: 1, padding: 14, displayColors: true,
               titleFont: { family: "'JetBrains Mono', monospace", size: 11 },
@@ -807,10 +809,11 @@
       return {
         responsive: true,
         maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
+        interaction: IS_MOBILE ? { mode: null } : { mode: 'index', intersect: false },
         plugins: {
           legend: { display: false },
           tooltip: {
+            enabled: !IS_MOBILE,
             backgroundColor: '#0A0C14',
             titleColor:      '#E4DED3',
             bodyColor:       '#5A5870',
