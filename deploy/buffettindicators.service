@@ -1,0 +1,28 @@
+[Unit]
+Description=BuffettIndicators web server
+After=network.target
+
+[Service]
+Type=simple
+User=noah
+WorkingDirectory=/srv/buffettindicators
+EnvironmentFile=/etc/buffettindicators.env
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=5
+
+# Sandboxing
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ReadWritePaths=/srv/buffettindicators/data
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

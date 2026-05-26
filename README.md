@@ -86,21 +86,27 @@ Cache TTLs vary by series: SP500 expires after 1 hour, GDP and other quarterly s
 
 ---
 
-## Deployment (Railway)
+## Deployment (VPS / systemd behind a reverse proxy)
 
-1. Create a new Railway project and connect the repo.
-2. Set the `FRED_API_KEY` environment variable in the Railway dashboard.
-3. Optionally set `PORT` (Railway injects this automatically) and `NODE_ENV=production`.
-4. Deploy. Railway terminates TLS at the edge — the Node process runs plain HTTP behind it. The server suppresses the TLS-not-found warning when `NODE_ENV=production`.
+The app runs as a plain-HTTP Node process bound to loopback; a front-end reverse proxy (Caddy, nginx, …) terminates TLS and forwards by hostname. This is how it's deployed on the production VPS.
 
-**Persistent cache (recommended).** Without extra configuration, `cache.db` lives inside the container and is wiped on every new deploy. To survive deploys:
+**Environment** — set via the systemd `EnvironmentFile` (e.g. `/etc/buffettindicators.env`, root-owned, `chmod 600`):
 
-1. Create a Railway Volume and mount it at `/data`.
-2. Set the `CACHE_DIR=/data` environment variable on the service.
+```
+NODE_ENV=production
+HOST=127.0.0.1                       # bind loopback only — reachable solely via the proxy
+PORT=3002
+CACHE_DIR=/srv/buffettindicators/data
+FRED_API_KEY=your_key_here
+```
 
-The server will create `cache.db` inside `CACHE_DIR` on first boot, and reload it on every subsequent start. All writes happen immediately — no data is lost if the process is killed hard.
+`HOST` defaults to `0.0.0.0` when unset (local dev). `NODE_ENV=production` suppresses the TLS-not-found warning and per-request logging. The reverse proxy must pass `X-Forwarded-For` (used for the per-IP rate limiter).
 
-No build step. The start command is `node server.js` (via `npm start`).
+**systemd unit** (`/etc/systemd/system/buffettindicators.service`) runs `node server.js` from `/srv/buffettindicators` as a non-root user, with `ReadWritePaths=/srv/buffettindicators/data` so the SQLite cache survives restarts and redeploys.
+
+**Deploy:** `./deploy.sh` rsyncs the repo to `/srv/buffettindicators`, runs `npm ci --omit=dev`, and restarts the service.
+
+The server creates `cache.db` inside `CACHE_DIR` on first boot and reloads it on every subsequent start. All writes happen immediately — no data is lost if the process is killed hard. No build step; the start command is `node server.js` (via `npm start`).
 
 ---
 

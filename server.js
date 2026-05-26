@@ -558,6 +558,9 @@ process.on("SIGTERM", shutdown);
 process.on("SIGINT",  shutdown);
 
 const protocol = tlsOptions ? "https" : "http";
-server.listen(port, () => {
-  console.log(`BuffettIndex server running at ${protocol}://localhost:${port}`);
+// Bind address. Defaults to all interfaces (Railway/local). Set HOST=127.0.0.1
+// in production behind a reverse proxy so the port isn't publicly reachable.
+const host = process.env.HOST || "0.0.0.0";
+server.listen(port, host, () => {
+  console.log(`BuffettIndex server running at ${protocol}://${host}:${port}`);
 });
